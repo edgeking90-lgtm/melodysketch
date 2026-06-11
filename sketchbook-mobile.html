@@ -621,6 +621,11 @@ function triggerNote(midi,dur,vel){
     if(!dur){if(_dwellGain)dwellBend(midi);else dwellStart(midi,.5);}
     litKey(midi);return;
   }
+  if((currentInstrument||'piano')==='violin'){
+    console.log('[sampler] violin sample missing — MIDI '+midi+' retrying in 500ms');
+    setTimeout(()=>{const ac=ensureAudio();window._sampler&&window._sampler.play(midi,ac.currentTime,dur||.8,(vel||.65)*.85);},500);
+    litKey(midi);return;
+  }
   const freq=midiFreq(midi),v=(vel||.6)*.4,d=dur||.5;
   makeTone(freq,t,d,v,.004,.25,'triangle');
   makeTone(freq*2,t,d*.6,v*.4,.004,.18,'sine');
@@ -629,7 +634,7 @@ function triggerNote(midi,dur,vel){
   litKey(midi);
 }
 
-/* ── LOCAL SAMPLER ── assets/{piano|violin}/{Note}{Oct}.mp3 */
+/* ── REMOTE SAMPLER ── https://edgeking90-lgtm.github.io/melodysketch/{piano|violin}/{Note}{Oct}.mp3 */
 (function(){
   const FLAT=['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
   const LO=21,HI=108;
@@ -637,7 +642,8 @@ function triggerNote(midi,dur,vel){
   const bufs={piano:new Map(),violin:new Map()};
   const ftch={piano:new Set(),violin:new Set()};
   const dcd={piano:new Set(),violin:new Set()};
-  function sPath(ins,m){return`assets/${ins}/${FLAT[m%12]}${Math.floor(m/12)-1}.mp3`;}
+  const SAMPLE_BASE='https://edgeking90-lgtm.github.io/melodysketch';
+  function sPath(ins,m){return`${SAMPLE_BASE}/${ins}/${FLAT[m%12]}${Math.floor(m/12)-1}.mp3`;}
   function clamp(m){return Math.max(LO,Math.min(HI,Math.round(m)));}
   async function fetchOne(ins,m){
     if(raw[ins].has(m)||ftch[ins].has(m))return;ftch[ins].add(m);
@@ -660,7 +666,9 @@ function triggerNote(midi,dur,vel){
     play(midi,when,dur,vol){
       const name=currentInstrument||'piano';
       ensureAudio();decodeReady(name);fetchOne(name,clamp(midi));
-      const nm=nearest(name,midi);if(nm===null)return false;
+      const nm=nearest(name,midi);
+      if(nm===null){console.log('[sampler] '+name+' sample missing — MIDI '+midi+' buffer not ready');return false;}
+      console.log('[sampler] playing '+sPath(name,nm)+' (shift '+(midi-nm)+' st)');
       const ac=audioCtx,src=ac.createBufferSource();
       src.buffer=bufs[name].get(nm);src.playbackRate.value=Math.pow(2,(midi-nm)/12);
       const g=ac.createGain(),v=vol!=null?vol:.65,rel=when+(dur!=null?dur:.8);
@@ -669,9 +677,14 @@ function triggerNote(midi,dur,vel){
       return true;
     },
     prefetch(ins){for(let m=48;m<=72;m++)fetchOne(ins,m);},
-    setInstrument(n){if(raw[n])this.prefetch(n);}
+    setInstrument(n){
+      this.prefetch(n);ensureAudio();decodeReady(n);
+      setTimeout(()=>{decodeReady(n);},800);
+      setTimeout(()=>{decodeReady(n);},2000);
+    }
   };
   window._sampler.prefetch('piano');
+  window._sampler.prefetch('violin');
 })();
 function setInstrument(name){
   currentInstrument=name;
@@ -684,12 +697,11 @@ function testC4(){
   const played=window._sampler&&window._sampler.play(60,audioCtx.currentTime,1.5,.65);
   if(played){toast('▶ C4 ['+currentInstrument+'] ✓');}
   else{
-    triggerNote(60,1.5,.65);
     toast('⏳ 샘플 로딩 중... 자동 재시도');
     setTimeout(()=>{
       ensureAudio();
       const p2=window._sampler&&window._sampler.play(60,audioCtx.currentTime,1.5,.65);
-      toast(p2?'▶ C4 ['+currentInstrument+'] ✓':'❌ 샘플 로드 실패 — F12 콘솔 확인');
+      toast(p2?'▶ C4 ['+currentInstrument+'] ✓':'❌ '+currentInstrument+' sample missing — F12 콘솔 확인');
     },2500);
   }
 }
