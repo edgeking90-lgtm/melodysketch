@@ -632,7 +632,7 @@ function smoothStop(){dwellStop();sActive=false;sLastMidi=null;}
 function triggerNote(midi,dur,vel){
   const ac=ensureAudio(),t=ac.currentTime;
   if(window._sampler&&window._sampler.play(midi,t,dur||.8,(vel||.65)*.85)){
-    if(!dur){if(_dwellGain)dwellBend(midi);else dwellStart(midi,.5);}
+    if(!dur&&_dwellGain)dwellStop();
     litKey(midi);return;
   }
   if((currentInstrument||'piano')==='violin'){
@@ -799,7 +799,7 @@ tcv.addEventListener('touchmove',e=>{
       if(currentNotePoints.length<MAX_NOTE)currentNotePoints.push({beat,midi:sn});
       lastSnappedMidi=sn;lastNotePointBeat=beat;lastUpMidi=sn;
       const _ac=ensureAudio();
-      const _ok=window._sampler&&window._sampler.play(sn,_ac.currentTime,.32,Math.min(.75,vel*.9));
+      const _ok=window._sampler&&window._sampler.play(sn,_ac.currentTime,.7,Math.min(.8,vel*.9));
       console.log('draw note:',midiName(sn),currentInstrument||'piano','url:',_ok?'sampler':'fallback','sampler:',_ok);
       if(_ok){if(_dwellGain)dwellStop();}
       else{if(_dwellGain)dwellBend(sn);else dwellStart(sn,.5);snapSound(sn,vel);}
