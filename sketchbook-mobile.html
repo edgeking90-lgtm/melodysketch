@@ -798,8 +798,12 @@ tcv.addEventListener('touchmove',e=>{
       const vel=Math.max(.15,Math.min(1,gestureSpeed*8));
       if(currentNotePoints.length<MAX_NOTE)currentNotePoints.push({beat,midi:sn});
       lastSnappedMidi=sn;lastNotePointBeat=beat;lastUpMidi=sn;
-      if(_dwellGain)dwellBend(sn);else dwellStart(sn,.5);
-      dwellMidi=sn;dwellStartTime=now;snapSound(sn,vel);litKey(sn);
+      const _ac=ensureAudio();
+      const _ok=window._sampler&&window._sampler.play(sn,_ac.currentTime,.32,Math.min(.75,vel*.9));
+      console.log('draw note:',midiName(sn),currentInstrument||'piano','url:',_ok?'sampler':'fallback','sampler:',_ok);
+      if(_ok){if(_dwellGain)dwellStop();}
+      else{if(_dwellGain)dwellBend(sn);else dwellStart(sn,.5);snapSound(sn,vel);}
+      dwellMidi=sn;dwellStartTime=now;litKey(sn);
     } else {
       if(dwellMidi!==sn){dwellMidi=sn;dwellStartTime=now;dwellStart(sn,.5);}
       else{const ms=now-dwellStartTime;dwellUpdate(Math.min(1,ms/600));const dist=lastNotePointBeat!==null?Math.abs(beat-lastNotePointBeat):Infinity;if(dist>=REPEAT_BEATS&&currentNotePoints.length<MAX_NOTE){currentNotePoints.push({beat,midi:sn});lastNotePointBeat=beat;}}
