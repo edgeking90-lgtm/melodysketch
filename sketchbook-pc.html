@@ -748,24 +748,33 @@ function litKey(midi){
 ═══════════════════════════════════════════ */
 let audioCtx=null;
 let currentInstrument='piano';
-function ensureAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();if(audioCtx.state==='suspended')audioCtx.resume();return audioCtx;}
+function ensureAudio(){
+  const isNew=!audioCtx;
+  if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  if(audioCtx.state==='suspended')audioCtx.resume();
+  if(isNew&&window._sampler)window._sampler.decodeAll();
+  return audioCtx;
+}
 let _comp=null;
 function getComp(){if(_comp)return _comp;const ac=ensureAudio();_comp=ac.createDynamicsCompressor();_comp.threshold.value=-16;_comp.ratio.value=4;_comp.connect(ac.destination);return _comp;}
 function makeTone(freq,t,dur,vol,att,dec,type='sine'){const ac=ensureAudio(),osc=ac.createOscillator(),g=ac.createGain();osc.type=type;osc.frequency.value=freq;osc.detune.value=(Math.random()-.5)*3;g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(vol,t+att);g.gain.exponentialRampToValueAtTime(Math.max(0.0001,vol*dec),t+att+.05);g.gain.exponentialRampToValueAtTime(0.0001,t+dur);osc.connect(g);g.connect(getComp());osc.start(t);osc.stop(t+dur+.05);}
 
 // Snap sound: 음이 바뀔 때
 function snapSound(midi,vel){
-  const ac=ensureAudio(),t=ac.currentTime,freq=midiFreq(midi);
-  const vol=Math.max(.12,Math.min(.55,vel*.5));
-  const dur=Math.max(.06,Math.min(.25,.28-vel*.2));
-  makeTone(freq,t,dur,vol,.004,.15,'triangle');
-  makeTone(freq*2,t,dur*.5,vol*.3,.003,.1,'sine');
-  // percussive click
+  const ac=ensureAudio(),t=ac.currentTime;
+  const dur=Math.max(.08,Math.min(.25,.28-vel*.2));
+  const vol=Math.max(.15,Math.min(.65,vel*.85));
+  console.log('draw note:',midiName(midi),currentInstrument);
+  if(window._sampler&&window._sampler.play(midi,t,dur,vol))return;
+  // oscillator fallback
+  const freq=midiFreq(midi),fvol=Math.max(.12,Math.min(.55,vel*.5));
+  makeTone(freq,t,dur,fvol,.004,.15,'triangle');
+  makeTone(freq*2,t,dur*.5,fvol*.3,.003,.1,'sine');
   const bsz=Math.floor(ac.sampleRate*.025),nb=ac.createBuffer(1,bsz,ac.sampleRate),nd=nb.getChannelData(0);
   for(let i=0;i<bsz;i++)nd[i]=(Math.random()*2-1)*Math.exp(-i/bsz*28);
   const ns=ac.createBufferSource();ns.buffer=nb;
   const nf=ac.createBiquadFilter();nf.type='bandpass';nf.frequency.value=freq*3;nf.Q.value=1.5;
-  const ng=ac.createGain();ng.gain.setValueAtTime(vol*.4,t);ng.gain.exponentialRampToValueAtTime(.0001,t+.04);
+  const ng=ac.createGain();ng.gain.setValueAtTime(fvol*.4,t);ng.gain.exponentialRampToValueAtTime(.0001,t+.04);
   ns.connect(nf);nf.connect(ng);ng.connect(getComp());ns.start(t);ns.stop(t+.05);
 }
 
@@ -801,7 +810,9 @@ function dwellStop(){
 
 // Accent: 손 뗄 때 "탁"
 function accentSound(midi){
-  const ac=ensureAudio(),t=ac.currentTime,freq=midiFreq(midi);
+  const ac=ensureAudio(),t=ac.currentTime;
+  if(window._sampler&&window._sampler.play(midi,t,.18,.5))return;
+  const freq=midiFreq(midi);
   makeTone(freq,t,.18,.32,.002,.14,'triangle');
   makeTone(freq*2,t,.1,.15,.002,.1,'sine');
   const bsz=Math.floor(ac.sampleRate*.04),nb=ac.createBuffer(1,bsz,ac.sampleRate),nd=nb.getChannelData(0);
@@ -1053,6 +1064,7 @@ function triggerNoteAt(midi,when,dur,vel){
       return true;
     },
     prefetch(ins){for(let m=48;m<=72;m++)fetchOne(ins,m);},
+    decodeAll(){decodeReady('piano');decodeReady('violin');},
     setInstrument(n){
       this.prefetch(n);ensureAudio();decodeReady(n);
       setTimeout(()=>{decodeReady(n);},800);
