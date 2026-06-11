@@ -676,6 +676,7 @@ function triggerNote(midi,dur,vel){
     });
   }
   function nearest(ins,midi){const b=bufs[ins];if(!b.size)return null;let best=null,d=Infinity;b.forEach((_,n)=>{const dd=Math.abs(n-midi);if(dd<d){d=dd;best=n;}});return best;}
+  let _vSrc=null,_vGain=null;
   window._sampler={
     play(midi,when,dur,vol){
       const name=currentInstrument||'piano';
@@ -685,9 +686,17 @@ function triggerNote(midi,dur,vel){
       console.log('[sampler] playing '+sPath(name,nm)+' (shift '+(midi-nm)+' st)');
       const ac=audioCtx,src=ac.createBufferSource();
       src.buffer=bufs[name].get(nm);src.playbackRate.value=Math.pow(2,(midi-nm)/12);
-      const g=ac.createGain(),v=vol!=null?vol:.65,rel=when+(dur!=null?dur:.8);
-      g.gain.setValueAtTime(v,when);g.gain.exponentialRampToValueAtTime(.0001,rel+.3);
-      src.connect(g);g.connect(getComp());src.start(when);src.stop(rel+.4);
+      const g=ac.createGain(),v=vol!=null?vol:.65,d=dur!=null?dur:.8;
+      src.connect(g);g.connect(getComp());
+      if(name==='violin'){
+        if(_vSrc){try{_vGain.gain.cancelScheduledValues(when);_vGain.gain.setValueAtTime(_vGain.gain.value||v,when);_vGain.gain.linearRampToValueAtTime(.0001,when+.15);}catch(e){}try{_vSrc.stop(when+.2);}catch(e){}}
+        g.gain.setValueAtTime(.001,when);g.gain.linearRampToValueAtTime(v,when+.12);
+        const rel=when+d;g.gain.setValueAtTime(v,rel);g.gain.exponentialRampToValueAtTime(.0001,rel+.8);
+        src.start(when);src.stop(rel+.85);_vSrc=src;_vGain=g;
+      }else{
+        const rel=when+d;g.gain.setValueAtTime(v,when);g.gain.exponentialRampToValueAtTime(.0001,rel+.1);
+        src.start(when);src.stop(rel+.15);
+      }
       return true;
     },
     prefetch(ins){for(let m=48;m<=72;m++)fetchOne(ins,m);},
@@ -701,6 +710,19 @@ function triggerNote(midi,dur,vel){
   window._sampler.prefetch('piano');
   window._sampler.prefetch('violin');
 })();
+let _lastDrawTime=0,_lastDrawMidi=null;
+function playDrawNote(midi,vel){
+  const inst=currentInstrument||'piano';
+  const now=performance.now();
+  if(inst==='piano'){if(now-_lastDrawTime<100)return;}
+  else{if(midi===_lastDrawMidi)return;}
+  _lastDrawTime=now;_lastDrawMidi=midi;
+  if(_dwellGain)dwellStop();
+  const ac=ensureAudio();
+  const ok=window._sampler&&window._sampler.play(midi,ac.currentTime,inst==='piano'?.5:2.5,(vel||.65));
+  console.log('[draw]',inst,midiName(midi),ok?'✓':'no-sample');
+  litKey(midi);
+}
 function setInstrument(name){
   currentInstrument=name;
   if(window._sampler)window._sampler.setInstrument(name);
@@ -761,7 +783,7 @@ tcv.addEventListener('touchstart',e=>{
     dwellMidi=null;dwellStartTime=null;lastUpMidi=null;
     drawStartX=sx;drawStartY=sy;drawStartTime=performance.now();
     if(shiftActive){smoothStart(drawMode==='free'?midi:snapToScale(Math.round(midi)));}
-    else{const sn=resolveInputMidi(midi);currentNotePoints.push({beat,midi:sn});lastSnappedMidi=sn;lastNotePointBeat=beat;triggerNote(sn);}
+    else{const sn=resolveInputMidi(midi);currentNotePoints.push({beat,midi:sn});lastSnappedMidi=sn;lastNotePointBeat=beat;_lastDrawTime=0;_lastDrawMidi=null;playDrawNote(sn,.65);}
     updateModePill();paintStrokes();
   }
 },{passive:false});
@@ -798,12 +820,8 @@ tcv.addEventListener('touchmove',e=>{
       const vel=Math.max(.15,Math.min(1,gestureSpeed*8));
       if(currentNotePoints.length<MAX_NOTE)currentNotePoints.push({beat,midi:sn});
       lastSnappedMidi=sn;lastNotePointBeat=beat;lastUpMidi=sn;
-      const _ac=ensureAudio();
-      const _ok=window._sampler&&window._sampler.play(sn,_ac.currentTime,.7,Math.min(.8,vel*.9));
-      console.log('draw note:',midiName(sn),currentInstrument||'piano','url:',_ok?'sampler':'fallback','sampler:',_ok);
-      if(_ok){if(_dwellGain)dwellStop();}
-      else{if(_dwellGain)dwellBend(sn);else dwellStart(sn,.5);snapSound(sn,vel);}
-      dwellMidi=sn;dwellStartTime=now;litKey(sn);
+      playDrawNote(sn,vel);
+      dwellMidi=sn;dwellStartTime=now;
     } else {
       if(dwellMidi!==sn){dwellMidi=sn;dwellStartTime=now;dwellStart(sn,.5);}
       else{const ms=now-dwellStartTime;dwellUpdate(Math.min(1,ms/600));const dist=lastNotePointBeat!==null?Math.abs(beat-lastNotePointBeat):Infinity;if(dist>=REPEAT_BEATS&&currentNotePoints.length<MAX_NOTE){currentNotePoints.push({beat,midi:sn});lastNotePointBeat=beat;}}
@@ -831,7 +849,7 @@ tcv.addEventListener('touchend',e=>{
       if(shiftActive){smoothStop();shiftActive=false;}
       if(lastUpMidi!==null&&isRealLine)accentSound(lastUpMidi);
       if(dwellMidi!==null||_dwellGain){dwellStop();dwellMidi=null;dwellStartTime=null;}
-      gestureLastX=null;gestureLastTime=null;gestureSpeed=0;lastUpMidi=null;
+      gestureLastX=null;gestureLastTime=null;gestureSpeed=0;lastUpMidi=null;_lastDrawMidi=null;
       const al=activeLayer();
       if(al&&al.type==='draw'&&currentRawStroke&&currentNotePoints&&currentNotePoints.length>=1){
         if(isRealLine&&al.strokes.length<MAX_GROUPS){al.strokes.push(currentRawStroke.map(p=>({...p})));al.nodeGroups.push(currentNotePoints.map(p=>({...p})));pushHistory();renderPanel();}
