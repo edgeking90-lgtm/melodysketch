@@ -548,11 +548,77 @@ function getAudio(note) {
   return cache[key];
 }
 
-// MARKING 모드 음 길이 설정 (초)
+// MARKING 음 길이 설정 (초)
 const MARK_DURATION = { piano: 0.3, violin: 0.3 };
 
-// fade step timers per note key
+// LINING 크로스페이드 설정 (ms)
+const LINING_FADE_MS = 120;   // 이전 음 페이드아웃 시간
+const LINING_OVERLAP_MS = 80; // 다음 음 시작 딜레이 (겹침)
+
 const fadeTimers = {};
+let liningPrevNote = null;
+
+// LINING 전용 재생 — 이전 음 크로스페이드 후 다음 음 시작
+function liningCrossfade(note) {
+  const targetVol = velocity / 127;
+
+  if (liningPrevNote && liningPrevNote !== note) {
+    // 이전 음 페이드아웃
+    const prevAudio = getAudio(liningPrevNote);
+    const key = 'lf_' + liningPrevNote;
+    clearInterval(fadeTimers[key]);
+    const startVol = prevAudio.volume;
+    const steps = 10;
+    const interval = LINING_FADE_MS / steps;
+    let i = 0;
+    fadeTimers[key] = setInterval(() => {
+      i++;
+      prevAudio.volume = Math.max(0, startVol * (1 - i / steps));
+      if (i >= steps) {
+        clearInterval(fadeTimers[key]);
+        prevAudio.pause();
+        prevAudio.currentTime = 0;
+        prevAudio.volume = targetVol;
+      }
+    }, interval);
+  }
+
+  // 새 음 — 음이 바뀔 때만 살짝 딜레이
+  const delay = (liningPrevNote && liningPrevNote !== note) ? LINING_OVERLAP_MS : 0;
+  setTimeout(() => {
+    try {
+      const a = getAudio(note);
+      a.currentTime = 0;
+      a.volume = targetVol;
+      a.play().catch(() => {});
+    } catch(e) {}
+  }, delay);
+
+  liningPrevNote = note;
+}
+
+// LINING 종료 — 마지막 음 천천히 페이드아웃
+function stopLining() {
+  if (!liningPrevNote) return;
+  const a = getAudio(liningPrevNote);
+  const key = 'lf_end_' + liningPrevNote;
+  clearInterval(fadeTimers[key]);
+  const startVol = a.volume;
+  const steps = 12;
+  const interval = 200 / steps;
+  let i = 0;
+  fadeTimers[key] = setInterval(() => {
+    i++;
+    a.volume = Math.max(0, startVol * (1 - i / steps));
+    if (i >= steps) {
+      clearInterval(fadeTimers[key]);
+      a.pause();
+      a.currentTime = 0;
+      a.volume = velocity / 127;
+    }
+  }, interval);
+  liningPrevNote = null;
+}
 
 let flashTimer;
 function playNote(note, isMarking) {
@@ -562,13 +628,11 @@ function playNote(note, isMarking) {
     a.volume = velocity / 127;
     a.play().catch(() => {});
 
-    // MARKING이면 duration 후 빠르게 fade out
     if (isMarking) {
-      const key = instrument + note;
+      const key = 'mk_' + instrument + note;
       clearInterval(fadeTimers[key]);
       const dur = MARK_DURATION[instrument] || 0.3;
       setTimeout(() => {
-        // 50ms 간격으로 volume을 0으로
         const startVol = a.volume;
         let steps = 0;
         const total = 8;
@@ -579,7 +643,7 @@ function playNote(note, isMarking) {
             clearInterval(fadeTimers[key]);
             a.pause();
             a.currentTime = 0;
-            a.volume = velocity / 127; // 다음 재생 위해 복원
+            a.volume = velocity / 127;
           }
         }, 20);
       }, dur * 1000);
@@ -617,7 +681,7 @@ function onStart(e) {
 
   if (mode === 'lining') {
     currentLine = { points: [{ x: pos.x, y: pos.y }], notes: [note] };
-    playNote(note);
+    liningCrossfade(note);
   }
   // marking: 일단 기다림 (onEnd에서 점 찍음)
 
@@ -638,7 +702,7 @@ function onMove(e) {
     if (note !== lastNote) {
       lastNote = note;
       currentLine.notes.push(note);
-      playNote(note);
+      liningCrossfade(note);
     }
     drawAll();
   }
@@ -662,6 +726,7 @@ function onEnd(e) {
       lines.push(currentLine);
     }
     currentLine = null;
+    stopLining(); // 마지막 음 천천히 페이드아웃
   }
 
   drawAll();
