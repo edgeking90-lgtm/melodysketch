@@ -1,8 +1,669 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Melody Sketch</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  background: #fff;
+  color: #111;
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── TOP BAR ── */
+#topbar {
+  height: 52px;
+  background: #fff;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.logo {
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #111;
+  white-space: nowrap;
+}
+.logo svg { width:18px; height:18px; flex-shrink:0; }
+#projectTitle {
+  flex: 1;
+  text-align: center;
+  font-size: 13px;
+  color: #888;
+  border: none;
+  background: transparent;
+  outline: none;
+}
+.topbar-actions { display: flex; gap: 4px; }
+.tb-btn {
+  width: 36px; height: 36px;
+  border: none; background: transparent;
+  border-radius: 8px; cursor: pointer;
+  font-size: 15px;
+  display: flex; align-items: center; justify-content: center;
+  color: #555; transition: background .12s;
+}
+.tb-btn:hover, .tb-btn:active { background: #f0f0f0; }
+.tb-btn.play {
+  background: #111; color: #fff;
+  border-radius: 50%; font-size: 13px;
+}
+.tb-btn.play:hover { background: #333; }
+
+/* ── LAYOUT ── */
+#main { flex: 1; display: flex; overflow: hidden; }
+
+/* ── SIDEBAR (PC only) ── */
+#sidebar {
+  width: 172px;
+  background: #fff;
+  border-right: 1px solid #e0e0e0;
+  padding: 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+.sb-label {
+  font-size: 10px; font-weight: 700;
+  letter-spacing: .08em; color: #aaa;
+  text-transform: uppercase;
+  display: block; margin-bottom: 6px;
+}
+.inst-btn {
+  width: 100%; padding: 9px 10px;
+  border: 1.5px solid #e0e0e0;
+  border-radius: 8px; background: #fff;
+  font-size: 13px; font-weight: 600;
+  cursor: pointer;
+  display: flex; align-items: center; gap: 7px;
+  margin-bottom: 5px;
+  transition: all .12s; color: #333;
+}
+.inst-btn:hover { border-color: #bbb; }
+.inst-btn.active { background: #111; color: #fff; border-color: #111; }
+.inst-btn .icon { font-size: 15px; }
+
+.oct-select {
+  width: 100%; padding: 8px 10px;
+  border: 1.5px solid #e0e0e0;
+  border-radius: 8px; font-size: 13px;
+  background: #fff; outline: none; color: #333; cursor: pointer;
+}
+.oct-select:focus { border-color: #888; }
+
+.vel-row { display: flex; align-items: center; gap: 8px; }
+.vel-row input[type=range] { flex:1; accent-color: #111; cursor: pointer; }
+.vel-val { font-size: 12px; color: #666; min-width: 26px; text-align: right; }
+
+.toggle-row { display: flex; align-items: center; justify-content: space-between; }
+.toggle-label { font-size: 13px; color: #333; }
+.toggle {
+  width: 36px; height: 20px;
+  background: #ddd; border-radius: 10px;
+  position: relative; cursor: pointer;
+  border: none; outline: none; transition: background .18s;
+}
+.toggle.on { background: #111; }
+.toggle::after {
+  content: ''; width: 14px; height: 14px;
+  background: #fff; border-radius: 50%;
+  position: absolute; top: 3px; left: 3px;
+  transition: left .18s;
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+.toggle.on::after { left: 19px; }
+
+.clear-btn {
+  width: 100%; padding: 8px;
+  border: 1.5px solid #e0e0e0;
+  border-radius: 8px; background: #fff;
+  font-size: 13px; cursor: pointer;
+  color: #666;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  transition: all .12s;
+}
+.clear-btn:hover { border-color: #f55; color: #f55; }
+
+/* ── MOBILE INSTRUMENT TABS ── */
+#inst-tabs {
+  display: none;
+  padding: 8px 10px;
+  gap: 6px;
+  flex-shrink: 0;
+  background: #fff;
+}
+.inst-tab {
+  flex: 1; padding: 9px 0;
+  border: 1.5px solid #e0e0e0;
+  border-radius: 8px; background: #fff;
+  font-size: 13px; font-weight: 600;
+  cursor: pointer; text-align: center;
+  transition: all .12s; color: #555;
+}
+.inst-tab.active { background: #111; color: #fff; border-color: #111; }
+
+/* ── CANVAS AREA ── */
+#canvas-wrap {
+  flex: 1; position: relative; overflow: hidden; background: #fff;
+}
+#y-labels {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 34px;
+  display: flex; flex-direction: column;
+  pointer-events: none; z-index: 2;
+}
+.y-lbl {
+  flex: 1;
+  display: flex; align-items: center; justify-content: flex-end;
+  padding-right: 4px;
+  font-size: 9px; color: #ccc; font-weight: 600;
+  user-select: none;
+}
+.y-lbl.c-note { color: #bbb; }
+.y-lbl.c4-note { color: #4a9eff; }
+
+canvas {
+  display: block; position: absolute;
+  left: 34px; top: 0; right: 0; bottom: 0;
+  width: calc(100% - 34px); height: 100%;
+  cursor: crosshair; touch-action: none;
+}
+#c4-line {
+  position: absolute; left: 34px; right: 0;
+  border-top: 1.5px dashed #4a9eff;
+  pointer-events: none; z-index: 3;
+}
+
+#hint {
+  position: absolute; left: 34px; right: 0; top: 0; bottom: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  pointer-events: none; gap: 8px; z-index: 1;
+}
+#hint svg { opacity: .12; width: 56px; height: 56px; }
+#hint .h1 { color: #bbb; font-size: 14px; }
+#hint .h2 { color: #ddd; font-size: 12px; }
+
+#note-flash {
+  position: absolute; bottom: 68px; left: 50%;
+  transform: translateX(-50%);
+  background: #111; color: #fff;
+  font-size: 13px; font-weight: 700;
+  padding: 5px 16px; border-radius: 20px;
+  opacity: 0; transition: opacity .15s;
+  pointer-events: none; z-index: 10;
+  white-space: nowrap;
+}
+#note-flash.show { opacity: 1; }
+
+/* ── BOTTOM BAR (Mobile only) ── */
+#bottombar {
+  display: none;
+  height: 54px;
+  background: #fff; border-top: 1px solid #e0e0e0;
+  align-items: center; justify-content: space-around;
+  padding: 0 8px; flex-shrink: 0;
+}
+.bb-btn {
+  width: 44px; height: 44px;
+  border: none; background: transparent;
+  border-radius: 10px; cursor: pointer;
+  font-size: 18px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 2px;
+  color: #555;
+}
+.bb-btn span { font-size: 9px; color: #aaa; }
+.bb-btn:active { background: #f5f5f5; }
+
+/* ── MENU DRAWER ── */
+#menu-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.3); z-index: 100;
+}
+#menu-overlay.open { display: block; }
+#menu-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: 230px; background: #fff;
+  padding: 16px; box-shadow: -4px 0 20px rgba(0,0,0,.1);
+  display: flex; flex-direction: column; gap: 2px;
+  overflow-y: auto;
+}
+#menu-drawer h3 {
+  font-size: 14px; font-weight: 700;
+  margin-bottom: 10px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+#menu-drawer h3 button {
+  border: none; background: none; font-size: 18px;
+  cursor: pointer; color: #aaa; line-height: 1;
+}
+.m-section {
+  padding: 10px 6px 3px;
+  font-size: 10px; font-weight: 700; color: #aaa;
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.m-item {
+  padding: 10px 8px; font-size: 13px; color: #333;
+  border-radius: 8px; cursor: pointer;
+  display: flex; align-items: center; gap: 9px;
+}
+.m-item:active { background: #f5f5f5; }
+.m-icon { font-size: 15px; width: 20px; text-align: center; }
+.m-vel {
+  padding: 6px 8px;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.m-vel .lbl {
+  font-size: 11px; font-weight: 700; color: #aaa;
+  text-transform: uppercase; letter-spacing: .06em;
+  display: flex; justify-content: space-between;
+}
+.m-vel .lbl span { color: #333; }
+.m-vel input[type=range] { width: 100%; accent-color: #111; }
+
+/* ── RESPONSIVE ── */
+@media (max-width: 640px) {
+  #sidebar { display: none; }
+  #inst-tabs { display: flex; }
+  #bottombar { display: flex; }
+  #note-flash { bottom: 62px; }
+}
+</style>
+</head>
 <body>
-  <h1>Melody Sketch</h1>
-  <p><a href="./sketchbook-mobile.html">Mobile version</a></p>
-  <p><a href="./sketchbook-pc.html">PC version</a></p>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <div class="logo">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M2 14 Q6 5 10 10 Q14 15 18 3"/>
+    </svg>
+    Melody Sketch
+  </div>
+  <input id="projectTitle" value="Untitled" placeholder="제목">
+  <div class="topbar-actions">
+    <button class="tb-btn" id="undoBtn" title="Undo">↩</button>
+    <button class="tb-btn" id="redoBtn" title="Redo">↪</button>
+    <button class="tb-btn play" id="playBtn">▶</button>
+    <button class="tb-btn" id="menuBtn">☰</button>
+  </div>
+</div>
+
+<!-- MOBILE INSTRUMENT TABS -->
+<div id="inst-tabs">
+  <button class="inst-tab active" id="mob-piano" onclick="selectInstrument('piano')">🎹 Piano</button>
+  <button class="inst-tab" id="mob-violin" onclick="selectInstrument('violin')">🎻 Violin</button>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+
+  <!-- SIDEBAR -->
+  <div id="sidebar">
+    <div>
+      <span class="sb-label">Instrument</span>
+      <button class="inst-btn active" id="pc-piano" onclick="selectInstrument('piano')">
+        <span class="icon">🎹</span> Piano
+      </button>
+      <button class="inst-btn" id="pc-violin" onclick="selectInstrument('violin')">
+        <span class="icon">🎻</span> Violin
+      </button>
+    </div>
+    <div>
+      <span class="sb-label">Octave Range</span>
+      <select class="oct-select" id="octSelect" onchange="setOctave(this.value)">
+        <option value="2">2 Octave</option>
+        <option value="3" selected>3 Octave</option>
+        <option value="4">4 Octave</option>
+        <option value="5">5 Octave</option>
+      </select>
+    </div>
+    <div>
+      <span class="sb-label">Velocity</span>
+      <div class="vel-row">
+        <input type="range" min="1" max="127" value="100" id="velSlider"
+               oninput="velocity=+this.value; document.getElementById('velVal').textContent=this.value">
+        <span class="vel-val" id="velVal">100</span>
+      </div>
+    </div>
+    <div>
+      <span class="sb-label">Grid</span>
+      <div class="toggle-row">
+        <span class="toggle-label">Show</span>
+        <button class="toggle on" id="gridToggle" onclick="toggleGrid()"></button>
+      </div>
+    </div>
+    <div>
+      <span class="sb-label">Clear</span>
+      <button class="clear-btn" onclick="clearAll()">🗑 Clear All</button>
+    </div>
+  </div>
+
+  <!-- CANVAS -->
+  <div id="canvas-wrap">
+    <div id="y-labels"></div>
+    <canvas id="cv"></canvas>
+    <div id="c4-line"></div>
+    <div id="hint">
+      <svg viewBox="0 0 56 56" fill="none" stroke="#888" stroke-width="2.5">
+        <path d="M6 42 Q16 18 28 28 Q40 38 50 10"/>
+        <circle cx="50" cy="10" r="3" fill="#888"/>
+      </svg>
+      <p class="h1">여기에 선을 그려보세요</p>
+      <p class="h2">좌표에 맞는 음이 연주됩니다</p>
+    </div>
+    <div id="note-flash"></div>
+  </div>
+</div>
+
+<!-- BOTTOM BAR (mobile) -->
+<div id="bottombar">
+  <button class="bb-btn" onclick="undo()">↩<span>Undo</span></button>
+  <button class="bb-btn" onclick="toggleGrid()">⊞<span>Grid</span></button>
+  <button class="bb-btn" onclick="clearAll()">🗑<span>Clear</span></button>
+</div>
+
+<!-- MENU -->
+<div id="menu-overlay" onclick="closeMenu()">
+  <div id="menu-drawer" onclick="event.stopPropagation()">
+    <h3>메뉴 <button onclick="closeMenu()">✕</button></h3>
+    <div class="m-section">Project</div>
+    <div class="m-item"><span class="m-icon">📄</span> 새 프로젝트</div>
+    <div class="m-item"><span class="m-icon">💾</span> 저장</div>
+    <div class="m-section">Settings</div>
+    <div class="m-vel">
+      <div class="lbl">Velocity <span id="velValMenu">100</span></div>
+      <input type="range" min="1" max="127" value="100"
+             oninput="velocity=+this.value; document.getElementById('velValMenu').textContent=this.value; document.getElementById('velVal').textContent=this.value; document.getElementById('velSlider').value=this.value">
+    </div>
+    <div class="m-item" onclick="toggleGrid(); closeMenu()">
+      <span class="m-icon" id="gridIcon">☑</span> 격자 표시
+    </div>
+    <div class="m-section">Help</div>
+    <div class="m-item"><span class="m-icon">❓</span> 도움말</div>
+  </div>
+</div>
+
+<script>
+// ── 88 NOTES (piano/violin 파일명과 1:1 매핑) ──
+const ALL_NOTES = [
+  'A0','Bb0','B0',
+  'C1','Db1','D1','Eb1','E1','F1','Gb1','G1','Ab1','A1','Bb1','B1',
+  'C2','Db2','D2','Eb2','E2','F2','Gb2','G2','Ab2','A2','Bb2','B2',
+  'C3','Db3','D3','Eb3','E3','F3','Gb3','G3','Ab3','A3','Bb3','B3',
+  'C4','Db4','D4','Eb4','E4','F4','Gb4','G4','Ab4','A4','Bb4','B4',
+  'C5','Db5','D5','Eb5','E5','F5','Gb5','G5','Ab5','A5','Bb5','B5',
+  'C6','Db6','D6','Eb6','E6','F6','Gb6','G6','Ab6','A6','Bb6','B6',
+  'C7','Db7','D7','Eb7','E7','F7','Gb7','G7','Ab7','A7','Bb7','B7',
+  'C8'
+];
+
+const BASE = 'https://edgeking90-lgtm.github.io/melodysketch/';
+const cache = {};
+
+// ── STATE ──
+let instrument = 'piano';
+let gridOn = true;
+let velocity = 100;
+let octaveRange = 3;
+let strokes = [];
+let current = null;
+let undoStack = [];
+let redoStack = [];
+
+// ── VISIBLE NOTES ──
+function visibleNotes() {
+  // 항상 C4 중심, octaveRange 옥타브
+  const c4 = ALL_NOTES.indexOf('C4');
+  const half = Math.round(octaveRange * 6);
+  const start = Math.max(0, c4 - half);
+  const end   = Math.min(ALL_NOTES.length - 1, c4 + half);
+  return ALL_NOTES.slice(start, end + 1).reverse(); // 높은 음이 위
+}
+
+function noteFromY(y) {
+  const notes = visibleNotes();
+  const i = Math.floor(y / cv.height * notes.length);
+  return notes[Math.min(Math.max(i, 0), notes.length - 1)];
+}
+
+function yOfNote(note) {
+  const notes = visibleNotes();
+  const i = notes.indexOf(note);
+  if (i < 0) return null;
+  return (i + 0.5) / notes.length * cv.height;
+}
+
+// ── CANVAS ──
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+
+function resize() {
+  const wrap = document.getElementById('canvas-wrap');
+  cv.width  = wrap.clientWidth - 34;
+  cv.height = wrap.clientHeight;
+  buildYLabels();
+  updateC4Line();
+  drawAll();
+}
+
+function buildYLabels() {
+  const el = document.getElementById('y-labels');
+  el.innerHTML = '';
+  visibleNotes().forEach(n => {
+    const d = document.createElement('div');
+    d.className = 'y-lbl' + (n === 'C4' ? ' c4-note' : n.startsWith('C') ? ' c-note' : '');
+    d.textContent = n.startsWith('C') ? n : '';
+    el.appendChild(d);
+  });
+}
+
+function updateC4Line() {
+  const y = yOfNote('C4');
+  const line = document.getElementById('c4-line');
+  if (y !== null) { line.style.top = y + 'px'; line.style.display = 'block'; }
+  else line.style.display = 'none';
+}
+
+function drawAll() {
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  if (gridOn) drawGrid();
+  strokes.forEach(drawStroke);
+  if (current) drawStroke(current);
+}
+
+function drawGrid() {
+  const notes = visibleNotes();
+  const step = cv.height / notes.length;
+  notes.forEach((n, i) => {
+    ctx.strokeStyle = n.startsWith('C') ? '#e8e8e8' : '#f5f5f5';
+    ctx.lineWidth   = n.startsWith('C') ? 1.5 : 1;
+    ctx.beginPath();
+    ctx.moveTo(0, i * step);
+    ctx.lineTo(cv.width, i * step);
+    ctx.stroke();
+  });
+  // 세로선
+  const xStep = cv.width / 8;
+  ctx.strokeStyle = '#f5f5f5'; ctx.lineWidth = 1;
+  for (let i = 1; i < 8; i++) {
+    ctx.beginPath(); ctx.moveTo(i * xStep, 0); ctx.lineTo(i * xStep, cv.height); ctx.stroke();
+  }
+}
+
+function drawStroke(s) {
+  if (!s.points || s.points.length < 2) return;
+  ctx.beginPath();
+  ctx.strokeStyle = '#111'; ctx.lineWidth = 2.5;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  s.points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+  ctx.stroke();
+}
+
+// ── AUDIO ──
+function getAudio(note) {
+  const key = instrument + note;
+  if (!cache[key]) {
+    cache[key] = new Audio(BASE + instrument + '/' + note + '.mp3');
+    cache[key].preload = 'auto';
+  }
+  return cache[key];
+}
+
+let flashTimer;
+function playNote(note) {
+  try {
+    const a = getAudio(note);
+    a.currentTime = 0;
+    a.volume = velocity / 127;
+    a.play().catch(() => {});
+  } catch(e) {}
+
+  const f = document.getElementById('note-flash');
+  f.textContent = note + '  ·  ' + (instrument === 'piano' ? '🎹' : '🎻');
+  f.classList.add('show');
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => f.classList.remove('show'), 600);
+}
+
+// ── POINTER ──
+let lastNote = null;
+let drawing = false;
+
+function getPos(e) {
+  const r = cv.getBoundingClientRect();
+  const sx = cv.width  / r.width;
+  const sy = cv.height / r.height;
+  const src = e.touches ? e.touches[0] : e;
+  return { x: (src.clientX - r.left) * sx, y: (src.clientY - r.top) * sy };
+}
+
+function onStart(e) {
+  e.preventDefault();
+  drawing = true;
+  const pos = getPos(e);
+  const note = noteFromY(pos.y);
+  current = { points: [{ x: pos.x, y: pos.y }] };
+  lastNote = note;
+  playNote(note);
+  hideHint();
+  redoStack = [];
+  drawAll();
+}
+
+function onMove(e) {
+  e.preventDefault();
+  if (!drawing || !current) return;
+  const pos = getPos(e);
+  const note = noteFromY(pos.y);
+  current.points.push({ x: pos.x, y: pos.y });
+  if (note !== lastNote) { lastNote = note; playNote(note); }
+  drawAll();
+}
+
+function onEnd(e) {
+  if (e) e.preventDefault();
+  if (!drawing) return;
+  drawing = false;
+  if (current && current.points.length > 0) {
+    undoStack.push(strokes.map(s => ({ points: [...s.points] })));
+    strokes.push(current);
+  }
+  current = null;
+  drawAll();
+}
+
+cv.addEventListener('mousedown',  onStart);
+cv.addEventListener('mousemove',  onMove);
+cv.addEventListener('mouseup',    onEnd);
+cv.addEventListener('mouseleave', onEnd);
+cv.addEventListener('touchstart', onStart, { passive: false });
+cv.addEventListener('touchmove',  onMove,  { passive: false });
+cv.addEventListener('touchend',   onEnd,   { passive: false });
+
+// ── CONTROLS ──
+function selectInstrument(inst) {
+  instrument = inst;
+  ['pc-piano','pc-violin','mob-piano','mob-violin'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('active', id.endsWith(inst));
+  });
+}
+
+function setOctave(v) {
+  octaveRange = parseInt(v);
+  buildYLabels(); updateC4Line(); drawAll();
+}
+
+function toggleGrid() {
+  gridOn = !gridOn;
+  document.getElementById('gridToggle').classList.toggle('on', gridOn);
+  document.getElementById('gridIcon').textContent = gridOn ? '☑' : '☐';
+  drawAll();
+}
+
+function clearAll() {
+  undoStack.push(strokes.map(s => ({ points: [...s.points] })));
+  strokes = []; current = null;
+  drawAll(); showHint();
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(strokes.map(s => ({ points: [...s.points] })));
+  strokes = undoStack.pop();
+  if (!strokes.length) showHint();
+  drawAll();
+}
+
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(strokes.map(s => ({ points: [...s.points] })));
+  strokes = redoStack.pop();
+  hideHint(); drawAll();
+}
+
+document.getElementById('undoBtn').onclick = undo;
+document.getElementById('redoBtn').onclick = redo;
+
+// PLAY
+document.getElementById('playBtn').onclick = () => {
+  const notes = [];
+  strokes.forEach(s => s.points.forEach((p, i) => {
+    const n = noteFromY(p.y);
+    if (i === 0 || n !== notes[notes.length - 1]) notes.push(n);
+  }));
+  notes.forEach((n, i) => setTimeout(() => playNote(n), i * 200));
+};
+
+document.getElementById('menuBtn').onclick = openMenu;
+
+function openMenu()  { document.getElementById('menu-overlay').classList.add('open'); }
+function closeMenu() { document.getElementById('menu-overlay').classList.remove('open'); }
+
+function hideHint() { document.getElementById('hint').style.display = 'none'; }
+function showHint() { document.getElementById('hint').style.display = 'flex'; }
+
+// ── INIT ──
+window.addEventListener('resize', resize);
+resize();
+</script>
 </body>
 </html>
