@@ -520,19 +520,33 @@ function drawMark(m) {
   ctx.fillText(m.note, m.x + 9, m.y + 3);
 }
 
-// LINING — 부드러운 선
+// LINING — ●~~~~~~~~~~~~●
 function drawLine(l) {
-  if (!l.points || l.points.length < 2) return;
-  ctx.beginPath();
-  ctx.strokeStyle = '#4a9eff';
-  ctx.lineWidth = 2.5;
-  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  l.points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-  ctx.stroke();
-  // 시작점 작은 원
-  if (l.points.length > 0) {
+  if (!l.points || l.points.length < 1) return;
+  const first = l.points[0];
+  const last  = l.points[l.points.length - 1];
+  const isActive = (currentLine && l === currentLine); // 드래그 중
+
+  // 선
+  if (l.points.length >= 2) {
     ctx.beginPath();
-    ctx.arc(l.points[0].x, l.points[0].y, 3.5, 0, Math.PI * 2);
+    ctx.strokeStyle = '#4a9eff';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    l.points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.stroke();
+  }
+
+  // 시작점 ●
+  ctx.beginPath();
+  ctx.arc(first.x, first.y, 5, 0, Math.PI * 2);
+  ctx.fillStyle = '#4a9eff';
+  ctx.fill();
+
+  // 종료점 ● — 드래그 완료 후에만
+  if (!isActive && l.points.length >= 2) {
+    ctx.beginPath();
+    ctx.arc(last.x, last.y, 5, 0, Math.PI * 2);
     ctx.fillStyle = '#4a9eff';
     ctx.fill();
   }
