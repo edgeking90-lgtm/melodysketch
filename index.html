@@ -19,19 +19,20 @@ html, body {
   height: 52px; background: #fff;
   border-bottom: 1px solid #e0e0e0;
   display: flex; align-items: center;
-  padding: 0 14px; gap: 10px; flex-shrink: 0;
+  padding: 0 10px; gap: 6px; flex-shrink: 0;
 }
 .logo {
   font-size: 15px; font-weight: 700;
   display: flex; align-items: center; gap: 6px;
-  color: #111; white-space: nowrap;
+  color: #111; white-space: nowrap; flex-shrink: 0;
 }
 .logo svg { width:18px; height:18px; flex-shrink:0; }
 #projectTitle {
-  flex: 1; text-align: center; font-size: 13px;
+  flex: 1; min-width: 0;
+  text-align: center; font-size: 13px;
   color: #888; border: none; background: transparent; outline: none;
 }
-.topbar-actions { display: flex; gap: 4px; }
+.topbar-actions { display: flex; gap: 2px; flex-shrink: 0; }
 .tb-btn {
   width: 36px; height: 36px;
   border: none; background: transparent;
@@ -42,6 +43,12 @@ html, body {
 .tb-btn:hover, .tb-btn:active { background: #f0f0f0; }
 .tb-btn.play { background: #111; color: #fff; border-radius: 50%; font-size: 13px; }
 .tb-btn.play:hover { background: #333; }
+
+/* 모바일에서 로고 텍스트 숨기기 */
+@media (max-width: 640px) {
+  .logo-text { display: none; }
+  #projectTitle { display: none; }
+}
 
 /* LAYOUT */
 #main { flex: 1; display: flex; overflow: hidden; }
@@ -67,6 +74,11 @@ html, body {
 .mode-btn.active-lining {
   background: #4a9eff; color: #fff; border-color: #4a9eff;
 }
+.mode-btn.active-connect {
+  background: #f5a623; color: #fff; border-color: #f5a623;
+}
+/* CONNECT 상태 점 강조 */
+.mark-selectable { cursor: pointer; }
 
 /* SIDEBAR (PC) */
 #sidebar {
@@ -269,7 +281,7 @@ canvas {
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
       <path d="M2 14 Q6 5 10 10 Q14 15 18 3"/>
     </svg>
-    Melody Sketch
+    <span class="logo-text">Melody Sketch</span>
   </div>
   <input id="projectTitle" value="Untitled" placeholder="제목">
   <div class="topbar-actions">
@@ -287,6 +299,13 @@ canvas {
   </button>
   <button class="mode-btn" id="btn-lining" onclick="setMode('lining')">
     ～ LINING
+  </button>
+  <button class="mode-btn" id="btn-connect" onclick="setMode('connect')">
+    ── CONNECT
+  </button>
+  <button class="mode-btn" id="btn-smooth" onclick="toggleSmooth()"
+          style="display:none; border-color:#4a9eff; color:#4a9eff; font-size:11px;">
+    보정 OFF
   </button>
 </div>
 
@@ -339,6 +358,13 @@ canvas {
       </div>
     </div>
     <div>
+      <span class="sb-label">Lining 보정</span>
+      <div class="toggle-row">
+        <span class="toggle-label">Smoothing</span>
+        <button class="toggle" id="smoothToggle" onclick="toggleSmooth()"></button>
+      </div>
+    </div>
+    <div>
       <span class="sb-label">Clear</span>
       <button class="clear-btn" onclick="clearAll()">🗑 Clear All</button>
     </div>
@@ -388,8 +414,36 @@ canvas {
     <div class="m-item" onclick="toggleGrid(); closeMenu()">
       <span class="m-icon" id="gridIcon">☑</span> 격자 표시
     </div>
+    <div class="m-item" onclick="toggleSmooth()">
+      <span class="m-icon" id="smoothIcon">☐</span> Lining 보정 (Smoothing)
+    </div>
     <div class="m-section">Help</div>
     <div class="m-item"><span class="m-icon">❓</span> 도움말</div>
+    <div class="m-section">Test</div>
+    <div class="m-item" onclick="loadElise(); closeMenu()">
+      <span class="m-icon">🎹</span> 엘리제를 위하여
+    </div>
+    <div class="m-item" onclick="document.getElementById('audioFileInput').click(); closeMenu()">
+      <span class="m-icon">🎵</span> 음원 분석 (테스트)
+    </div>
+  </div>
+</div>
+
+<!-- 숨긴 파일 입력 -->
+<input type="file" id="audioFileInput" accept="audio/*" style="display:none" onchange="analyzeAudio(this)">
+
+<!-- 음원 분석 오버레이 -->
+<div id="analysis-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:200; align-items:center; justify-content:center;">
+  <div style="background:#fff; border-radius:16px; padding:24px; width:90%; max-width:360px; text-align:center;">
+    <div style="font-size:15px; font-weight:700; margin-bottom:8px;">🎵 음원 분석 중...</div>
+    <div id="analysis-status" style="font-size:13px; color:#888; margin-bottom:16px;">파일 읽는 중</div>
+    <div id="analysis-progress" style="height:4px; background:#eee; border-radius:2px; overflow:hidden;">
+      <div id="analysis-bar" style="height:100%; background:#4a9eff; width:0%; transition:width .3s;"></div>
+    </div>
+    <button onclick="document.getElementById('analysis-overlay').style.display='none'"
+            style="margin-top:16px; padding:8px 20px; border:1.5px solid #ddd; border-radius:8px; background:#fff; font-size:13px; cursor:pointer;">
+      취소
+    </button>
   </div>
 </div>
 
@@ -412,19 +466,33 @@ const cache = {};
 
 // ── STATE ──
 let instrument = 'piano';
-let mode = 'marking'; // 'marking' | 'lining'
+let mode = 'marking';
 let gridOn = true;
+let smoothOn = false;
 let velocity = 100;
 let octaveRange = 3;
+let scrollX = 0;
+
+// ── 시간축 ──
+let BPM = 120;
+const BEATS_PER_BAR = 4;       // 4/4박자
+let pixelsPerBeat = 80;        // 1 beat = 80px
+function secondsPerBeat() { return 60 / BPM; }
+function xToTime(x) { return (x / pixelsPerBeat) * secondsPerBeat(); } // px → 초
+function timeToX(t) { return t * BPM / 60 * pixelsPerBeat; }           // 초 → px
 
 // marks: { x, y, note }  — MARKING 점들
 // lines: { points:[{x,y}], notes:[note,...] }  — LINING 선들
 let marks = [];
 let lines = [];
+let connections = []; // { a: markIndex, b: markIndex }
 let currentLine = null;
 let undoStack = [];
 let redoStack = [];
 let drawing = false;
+
+// CONNECT 모드 상태
+let connectFirst = null; // 첫 번째로 선택된 mark index
 
 // ── NOTES ──
 function visibleNotes() {
@@ -483,17 +551,65 @@ function drawAll() {
   ctx.clearRect(0, 0, cv.width, cv.height);
   if (gridOn) drawGrid();
 
+  // scrollX 오프셋 적용
+  ctx.save();
+  ctx.translate(-scrollX, 0);
+
+  // CONNECT 연결선
+  connections.forEach(c => {
+    const a = marks[c.a];
+    const b = marks[c.b];
+    if (!a || !b) return;
+    ctx.beginPath();
+    ctx.strokeStyle = '#f5a623';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 3]);
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  });
+
   // LINING 선들
   lines.forEach(l => drawLine(l));
   if (currentLine) drawLine(currentLine);
 
   // MARKING 점들
-  marks.forEach(m => drawMark(m));
+  marks.forEach((m, i) => drawMark(m, i));
+
+  ctx.restore();
+
+  // 스크롤 인디케이터 (scrollX > 0 일 때만)
+  drawScrollIndicator();
+}
+
+function drawScrollIndicator() {
+  if (scrollX <= 0) return;
+  // 하단 얇은 스크롤바
+  const totalW = getTotalWidth();
+  const ratio = cv.width / totalW;
+  if (ratio >= 1) return;
+  const barW = Math.max(40, cv.width * ratio);
+  const barX = (scrollX / (totalW - cv.width)) * (cv.width - barW);
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.beginPath();
+  ctx.roundRect(barX, cv.height - 6, barW, 4, 2);
+  ctx.fill();
+}
+
+function getTotalWidth() {
+  // 모든 점/선의 최대 X + 여유
+  let maxX = cv.width;
+  marks.forEach(m => { if (m.x > maxX) maxX = m.x; });
+  lines.forEach(l => l.points.forEach(p => { if (p.x > maxX) maxX = p.x; }));
+  return maxX + cv.width * 0.5;
 }
 
 function drawGrid() {
   const notes = visibleNotes();
   const step = cv.height / notes.length;
+
+  // ── 가로선 (음높이) ──
   notes.forEach((n, i) => {
     ctx.strokeStyle = n.startsWith('C') ? '#e8e8e8' : '#f5f5f5';
     ctx.lineWidth   = n.startsWith('C') ? 1.5 : 1;
@@ -501,23 +617,85 @@ function drawGrid() {
     ctx.moveTo(0, i * step); ctx.lineTo(cv.width, i * step);
     ctx.stroke();
   });
-  const xStep = cv.width / 8;
-  ctx.strokeStyle = '#f5f5f5'; ctx.lineWidth = 1;
-  for (let i = 1; i < 8; i++) {
-    ctx.beginPath(); ctx.moveTo(i * xStep, 0); ctx.lineTo(i * xStep, cv.height); ctx.stroke();
+
+  // ── 세로선 (시간축: beat / bar 기준) ──
+  const beatPx = pixelsPerBeat;
+  const barPx  = beatPx * BEATS_PER_BAR;
+
+  // scrollX 기준 시작 beat
+  const firstBeat = Math.floor(scrollX / beatPx);
+  const lastBeat  = Math.ceil((scrollX + cv.width) / beatPx) + 1;
+
+  for (let b = firstBeat; b <= lastBeat; b++) {
+    const screenX = b * beatPx - scrollX;
+    const isBar = b % BEATS_PER_BAR === 0;
+
+    if (isBar) {
+      // 마디선 — 진하게
+      ctx.strokeStyle = '#ddd';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(screenX, 0); ctx.lineTo(screenX, cv.height);
+      ctx.stroke();
+      // 마디 번호
+      const barNum = b / BEATS_PER_BAR + 1;
+      ctx.fillStyle = '#ccc';
+      ctx.font = '9px sans-serif';
+      ctx.fillText(barNum, screenX + 3, 10);
+    } else {
+      // 박자선 — 연하게
+      ctx.strokeStyle = '#f0f0f0';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(screenX, 0); ctx.lineTo(screenX, cv.height);
+      ctx.stroke();
+    }
   }
 }
 
 // MARKING — 채워진 원
-function drawMark(m) {
+function drawMark(m, idx) {
+  const isSelected = (mode === 'connect' && connectFirst === idx);
   ctx.beginPath();
-  ctx.arc(m.x, m.y, 6, 0, Math.PI * 2);
-  ctx.fillStyle = '#111';
+  ctx.arc(m.x, m.y, isSelected ? 9 : 6, 0, Math.PI * 2);
+  ctx.fillStyle = isSelected ? '#f5a623' : '#111';
   ctx.fill();
+  if (isSelected) {
+    // 선택 링
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, 13, 0, Math.PI * 2);
+    ctx.strokeStyle = '#f5a623';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
   // 음이름 레이블
   ctx.fillStyle = '#555';
   ctx.font = '9px sans-serif';
   ctx.fillText(m.note, m.x + 9, m.y + 3);
+}
+
+// 포인트 다운샘플
+function downsample(pts, every) {
+  if (pts.length <= 4) return pts;
+  const result = [pts[0]];
+  for (let i = every; i < pts.length - 1; i += every) result.push(pts[i]);
+  result.push(pts[pts.length - 1]);
+  return result;
+}
+
+// Chaikin 알고리즘 — passes 횟수만큼 반복
+function chaikin(pts, passes) {
+  let p = pts;
+  for (let pass = 0; pass < passes; pass++) {
+    const next = [p[0]];
+    for (let i = 0; i < p.length - 1; i++) {
+      next.push({ x: p[i].x * 0.75 + p[i+1].x * 0.25, y: p[i].y * 0.75 + p[i+1].y * 0.25 });
+      next.push({ x: p[i].x * 0.25 + p[i+1].x * 0.75, y: p[i].y * 0.25 + p[i+1].y * 0.75 });
+    }
+    next.push(p[p.length - 1]);
+    p = next;
+  }
+  return p;
 }
 
 // LINING — ●~~~~~~~~~~~~●
@@ -525,15 +703,36 @@ function drawLine(l) {
   if (!l.points || l.points.length < 1) return;
   const first = l.points[0];
   const last  = l.points[l.points.length - 1];
-  const isActive = (currentLine && l === currentLine); // 드래그 중
+  const isActive = (currentLine && l === currentLine);
+  // 선을 그릴 당시의 smoothed 플래그 사용 (전역 smoothOn 아님)
+  const useSmooth = l.smoothed;
 
-  // 선
   if (l.points.length >= 2) {
+    let pts;
+    if (useSmooth) {
+      // 강한 보정: 6개마다 다운샘플 + Chaikin 6패스
+      const ds = downsample(l.points, 6);
+      pts = chaikin(ds, 6);
+    } else {
+      pts = l.points;
+    }
+
     ctx.beginPath();
     ctx.strokeStyle = '#4a9eff';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = useSmooth ? 2.5 : 2;
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    l.points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+
+    if (useSmooth && pts.length >= 3) {
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length - 1; i++) {
+        const mx = (pts[i].x + pts[i+1].x) / 2;
+        const my = (pts[i].y + pts[i+1].y) / 2;
+        ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+      }
+      ctx.lineTo(pts[pts.length-1].x, pts[pts.length-1].y);
+    } else {
+      pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    }
     ctx.stroke();
   }
 
@@ -681,11 +880,56 @@ function getPos(e) {
   const sx = cv.width / r.width;
   const sy = cv.height / r.height;
   const src = e.touches ? e.touches[0] : e;
-  return { x: (src.clientX - r.left) * sx, y: (src.clientY - r.top) * sy };
+  return {
+    x: (src.clientX - r.left) * sx + scrollX, // scrollX 보정
+    y: (src.clientY - r.top) * sy
+  };
 }
 
-function onStart(e) {
+// ── SCROLL (두루마리) ──
+let scrolling = false;
+let scrollStartX = 0;
+let scrollStartScrollX = 0;
+let touchStartX = 0;
+let touchCount = 0;
+
+// PC: 마우스 휠 가로 스크롤
+cv.addEventListener('wheel', (e) => {
   e.preventDefault();
+  const delta = e.deltaX !== 0 ? e.deltaX : e.deltaY;
+  scrollX = Math.max(0, scrollX + delta);
+  drawAll();
+}, { passive: false });
+
+// 터치 이벤트는 아래 통합 핸들러에서 처리
+
+function onStart(e) {
+  if (scrolling) return;
+  e.preventDefault();
+
+  // CONNECT 모드: 점 선택 처리
+  if (mode === 'connect') {
+    const pos = getPos(e);
+    const hit = findMarkNear(pos.x, pos.y);
+    if (hit === null) return;
+
+    if (connectFirst === null) {
+      // 첫 번째 점 선택
+      connectFirst = hit;
+    } else if (connectFirst !== hit) {
+      // 두 번째 점 선택 → 연결
+      saveUndo();
+      connections.push({ a: connectFirst, b: hit });
+      connectFirst = null;
+      setMode('marking'); // 연결 완료 후 marking 모드로 복귀
+    } else {
+      // 같은 점 다시 탭 → 선택 해제
+      connectFirst = null;
+    }
+    drawAll();
+    return;
+  }
+
   drawing = true;
   hasMoved = false;
   const pos = getPos(e);
@@ -694,7 +938,7 @@ function onStart(e) {
   lastNote = note;
 
   if (mode === 'lining') {
-    currentLine = { points: [{ x: pos.x, y: pos.y }], notes: [note] };
+    currentLine = { points: [{ x: pos.x, y: pos.y }], notes: [note], smoothed: smoothOn };
     liningCrossfade(note);
   }
   // marking: 일단 기다림 (onEnd에서 점 찍음)
@@ -750,16 +994,68 @@ cv.addEventListener('mousedown',  onStart);
 cv.addEventListener('mousemove',  onMove);
 cv.addEventListener('mouseup',    onEnd);
 cv.addEventListener('mouseleave', onEnd);
-cv.addEventListener('touchstart', onStart, { passive: false });
-cv.addEventListener('touchmove',  onMove,  { passive: false });
-cv.addEventListener('touchend',   onEnd,   { passive: false });
+
+// ── 터치 통합 핸들러 ──
+cv.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (e.touches.length === 2) {
+    // 2손가락: 스크롤 모드
+    scrolling = true;
+    drawing = false;
+    currentLine = null;
+    liningPrevNote = null;
+    scrollStartX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    scrollStartScrollX = scrollX;
+  } else if (e.touches.length === 1 && !scrolling) {
+    // 1손가락: 그리기
+    onStart(e);
+  }
+}, { passive: false });
+
+cv.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (scrolling && e.touches.length === 2) {
+    // 2손가락 스크롤
+    const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    scrollX = Math.max(0, scrollStartScrollX + (scrollStartX - midX));
+    drawAll();
+  } else if (!scrolling && e.touches.length === 1) {
+    // 1손가락 그리기
+    onMove(e);
+  }
+}, { passive: false });
+
+cv.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  if (e.touches.length < 2 && scrolling) {
+    scrolling = false;
+  } else if (!scrolling) {
+    onEnd(e);
+  }
+}, { passive: false });
+
+// ── CONNECT 헬퍼 ──
+// 탭 위치에서 가장 가까운 mark 찾기 (HIT_RADIUS 안에 있을 때)
+const HIT_RADIUS = 24;
+function findMarkNear(x, y) {
+  let best = null, bestDist = HIT_RADIUS;
+  marks.forEach((m, i) => {
+    const d = Math.hypot(m.x - x, m.y - y);
+    if (d < bestDist) { bestDist = d; best = i; }
+  });
+  return best;
+}
 
 // ── MODE ──
 function setMode(m) {
   mode = m;
-  // modebar
+  connectFirst = null;
   document.getElementById('btn-marking').className = 'mode-btn' + (m === 'marking' ? ' active-marking' : '');
   document.getElementById('btn-lining').className  = 'mode-btn' + (m === 'lining'  ? ' active-lining'  : '');
+  document.getElementById('btn-connect').className = 'mode-btn' + (m === 'connect' ? ' active-connect' : '');
+  // smooth 버튼 — LINING일 때만 표시
+  const sb = document.getElementById('btn-smooth');
+  sb.style.display = m === 'lining' ? '' : 'none';
   // sidebar
   const sbM = document.getElementById('sb-marking');
   const sbL = document.getElementById('sb-lining');
@@ -767,10 +1063,11 @@ function setMode(m) {
   if (sbL) sbL.classList.toggle('active', m === 'lining');
   // canvas indicator
   const ind = document.getElementById('mode-indicator');
-  ind.className = 'marking' === m ? 'marking' : 'lining';
-  ind.textContent = m === 'marking' ? '● MARKING' : '～ LINING';
-  // cursor
-  cv.style.cursor = m === 'marking' ? 'crosshair' : 'cell';
+  if (m === 'marking') { ind.className = 'marking'; ind.textContent = '● MARKING'; ind.style.background = ''; }
+  else if (m === 'lining') { ind.className = 'lining'; ind.textContent = '～ LINING'; ind.style.background = ''; }
+  else { ind.className = 'lining'; ind.textContent = '── CONNECT'; ind.style.background = '#f5a623'; }
+  cv.style.cursor = m === 'marking' ? 'crosshair' : m === 'connect' ? 'pointer' : 'cell';
+  drawAll();
 }
 
 // ── CONTROLS ──
@@ -794,47 +1091,196 @@ function toggleGrid() {
   drawAll();
 }
 
+function toggleSmooth() {
+  smoothOn = !smoothOn;
+  const st = document.getElementById('smoothToggle');
+  if (st) st.classList.toggle('on', smoothOn);
+  const si = document.getElementById('smoothIcon');
+  if (si) si.textContent = smoothOn ? '☑' : '☐';
+  const sb = document.getElementById('btn-smooth');
+  sb.textContent = smoothOn ? '보정 ON' : '보정 OFF';
+  sb.style.background = smoothOn ? '#4a9eff' : '';
+  sb.style.color = smoothOn ? '#fff' : '#4a9eff';
+  drawAll();
+}
+
 function saveUndo() {
   undoStack.push({
     marks: marks.map(m => ({...m})),
-    lines: lines.map(l => ({ points: [...l.points], notes: [...l.notes] }))
+    lines: lines.map(l => ({ points: [...l.points], notes: [...l.notes], smoothed: l.smoothed })),
+    connections: connections.map(c => ({...c}))
   });
 }
 
 function clearAll() {
   saveUndo();
-  marks = []; lines = []; currentLine = null;
+  marks = []; lines = []; connections = []; currentLine = null;
+  connectFirst = null;
   drawAll(); showHint();
 }
 
 function undo() {
   if (!undoStack.length) return;
-  redoStack.push({ marks: marks.map(m=>({...m})), lines: lines.map(l=>({points:[...l.points],notes:[...l.notes]})) });
+  redoStack.push({
+    marks: marks.map(m=>({...m})),
+    lines: lines.map(l=>({points:[...l.points],notes:[...l.notes],smoothed:l.smoothed})),
+    connections: connections.map(c=>({...c}))
+  });
   const s = undoStack.pop();
-  marks = s.marks; lines = s.lines;
+  marks = s.marks; lines = s.lines; connections = s.connections;
   if (!marks.length && !lines.length) showHint();
   drawAll();
 }
 
 function redo() {
   if (!redoStack.length) return;
-  undoStack.push({ marks: marks.map(m=>({...m})), lines: lines.map(l=>({points:[...l.points],notes:[...l.notes]})) });
+  undoStack.push({
+    marks: marks.map(m=>({...m})),
+    lines: lines.map(l=>({points:[...l.points],notes:[...l.notes],smoothed:l.smoothed})),
+    connections: connections.map(c=>({...c}))
+  });
   const s = redoStack.pop();
-  marks = s.marks; lines = s.lines;
+  marks = s.marks; lines = s.lines; connections = s.connections;
   hideHint(); drawAll();
 }
 
 document.getElementById('undoBtn').onclick = undo;
 document.getElementById('redoBtn').onclick = redo;
 
-// PLAY
+// PLAY / STOP
+let playTimers = [];
+let isPlaying = false;
+
+// PLAY 전용 바이올린 monophonic 처리
+let playViolinCurrent = null;
+const PLAY_VIOLIN_FADE_MS = 80;
+
+function playViolinMono(note) {
+  const targetVol = velocity / 127;
+
+  // 이전 바이올린 음 fade out
+  if (playViolinCurrent && playViolinCurrent !== note) {
+    const prev = getAudio(playViolinCurrent);
+    const startVol = prev.volume;
+    const steps = 6;
+    const interval = PLAY_VIOLIN_FADE_MS / steps;
+    let i = 0;
+    const t = setInterval(() => {
+      i++;
+      prev.volume = Math.max(0, startVol * (1 - i / steps));
+      if (i >= steps) {
+        clearInterval(t);
+        prev.pause();
+        prev.currentTime = 0;
+        prev.volume = targetVol;
+      }
+    }, interval);
+  }
+
+  // 새 음 시작
+  setTimeout(() => {
+    try {
+      const a = getAudio(note);
+      a.currentTime = 0;
+      a.volume = targetVol;
+      a.play().catch(() => {});
+    } catch(e) {}
+  }, playViolinCurrent && playViolinCurrent !== note ? PLAY_VIOLIN_FADE_MS / 2 : 0);
+
+  playViolinCurrent = note;
+}
+
+function stopPlayViolin() {
+  if (!playViolinCurrent) return;
+  const a = getAudio(playViolinCurrent);
+  const startVol = a.volume;
+  const steps = 10;
+  let i = 0;
+  const t = setInterval(() => {
+    i++;
+    a.volume = Math.max(0, startVol * (1 - i / steps));
+    if (i >= steps) {
+      clearInterval(t);
+      a.pause();
+      a.currentTime = 0;
+      a.volume = velocity / 127;
+    }
+  }, 20);
+  playViolinCurrent = null;
+}
+
+function startPlay() {
+  const events = [];
+
+  marks.forEach(m => {
+    const timeMs = xToTime(m.x) * 1000;
+    const durMs  = (m.durationBeats || 0.5) * secondsPerBeat() * 1000;
+    events.push({ timeMs, note: m.note, durMs });
+  });
+
+  lines.forEach(l => {
+    if (!l.notes || !l.points) return;
+    let prevNote = null;
+    let noteStartX = l.points[0]?.x || 0;
+    l.points.forEach((p, i) => {
+      const note = l.notes[i] || l.notes[l.notes.length - 1];
+      if (note !== prevNote) {
+        if (prevNote !== null) {
+          const durMs = xToTime(p.x - noteStartX) * 1000;
+          events.push({ timeMs: xToTime(noteStartX) * 1000, note: prevNote, durMs });
+        }
+        prevNote = note;
+        noteStartX = p.x;
+      }
+    });
+    if (prevNote) {
+      const lastX = l.points[l.points.length - 1]?.x || noteStartX;
+      const durMs = Math.max(200, xToTime(lastX - noteStartX) * 1000);
+      events.push({ timeMs: xToTime(noteStartX) * 1000, note: prevNote, durMs });
+    }
+  });
+
+  if (!events.length) return;
+
+  events.sort((a, b) => a.timeMs - b.timeMs);
+
+  isPlaying = true;
+  playViolinCurrent = null;
+  document.getElementById('playBtn').textContent = '■';
+  document.getElementById('playBtn').title = 'Stop';
+
+  playTimers = events.map((ev, i) => {
+    const t = setTimeout(() => {
+      if (instrument === 'violin') {
+        playViolinMono(ev.note); // 바이올린: monophonic
+      } else {
+        playNote(ev.note);       // 피아노: 기존 방식
+      }
+      if (i === events.length - 1) stopPlay();
+    }, ev.timeMs);
+    return t;
+  });
+}
+
+function stopPlay() {
+  playTimers.forEach(t => clearTimeout(t));
+  playTimers = [];
+  isPlaying = false;
+  // 바이올린 monophonic 정리
+  if (instrument === 'violin') stopPlayViolin();
+  // 모든 오디오 즉시 정지
+  Object.values(cache).forEach(a => {
+    try { a.pause(); a.currentTime = 0; } catch(e) {}
+  });
+  liningPrevNote = null;
+  playViolinCurrent = null;
+  document.getElementById('playBtn').textContent = '▶';
+  document.getElementById('playBtn').title = 'Play';
+}
+
 document.getElementById('playBtn').onclick = () => {
-  const seq = [];
-  // marks는 x순 정렬
-  [...marks].sort((a,b) => a.x - b.x).forEach(m => seq.push(m.note));
-  // lines는 등록 순서대로
-  lines.forEach(l => l.notes.forEach(n => seq.push(n)));
-  seq.forEach((n, i) => setTimeout(() => playNote(n), i * 200));
+  if (isPlaying) stopPlay();
+  else startPlay();
 };
 
 document.getElementById('menuBtn').onclick = openMenu;
@@ -843,8 +1289,269 @@ function closeMenu() { document.getElementById('menu-overlay').classList.remove(
 function hideHint()  { document.getElementById('hint').style.display = 'none'; }
 function showHint()  { document.getElementById('hint').style.display = 'flex'; }
 
-// INIT
-window.addEventListener('resize', resize);
+// ── 음원 분석 (테스트 모드) ──
+function analyzeAudio(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+
+  const overlay = document.getElementById('analysis-overlay');
+  const status  = document.getElementById('analysis-status');
+  const bar     = document.getElementById('analysis-bar');
+  overlay.style.display = 'flex';
+  status.textContent = '파일 읽는 중...';
+  bar.style.width = '10%';
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    status.textContent = '오디오 디코딩 중...';
+    bar.style.width = '30%';
+
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const actx = new AudioContext();
+
+    actx.decodeAudioData(e.target.result, (buffer) => {
+      status.textContent = '주파수 분석 중...';
+      bar.style.width = '60%';
+
+      const rawData = buffer.getChannelData(0);
+      const sampleRate = buffer.sampleRate;
+      const duration = buffer.duration;
+
+      // 캔버스 가로를 두루마리 기준으로 매핑
+      // 1초 = 80px 기준으로 확장
+      const PX_PER_SEC = 80;
+      const totalWidth = Math.max(cv.width, duration * PX_PER_SEC);
+
+      // 분석 구간: 0.1초마다 피치 추출
+      const interval = 0.1;
+      const samplesPerChunk = Math.floor(sampleRate * interval);
+      const chunks = Math.floor(rawData.length / samplesPerChunk);
+
+      // 파형 + 피치 데이터 수집
+      const wavePoints = [];
+      const pitchMarks = [];
+      const notes = visibleNotes();
+
+      for (let c = 0; c < chunks; c++) {
+        const start = c * samplesPerChunk;
+        const chunk = rawData.slice(start, start + samplesPerChunk);
+
+        // RMS (파형 진폭)
+        let rms = 0;
+        for (let s = 0; s < chunk.length; s++) rms += chunk[s] * chunk[s];
+        rms = Math.sqrt(rms / chunk.length);
+
+        // 자기상관으로 기본 주파수 추정
+        const freq = autocorrelate(chunk, sampleRate);
+        const x = (c / chunks) * totalWidth;
+
+        wavePoints.push({ x, rms });
+
+        if (freq > 27 && freq < 4200 && rms > 0.005) {
+          const note = freqToNote(freq);
+          const y = yOfNote(note);
+          if (y !== null) pitchMarks.push({ x, y, note, rms });
+        }
+      }
+
+      bar.style.width = '90%';
+      status.textContent = '캔버스에 표시 중...';
+
+      setTimeout(() => {
+        // 기존 내용 유지하고 분석 결과 추가
+        saveUndo();
+        hideHint();
+
+        // LINING: 피치 흐름을 선으로
+        if (pitchMarks.length >= 2) {
+          // 인접한 점들을 묶어서 선으로
+          let seg = { points: [{ x: pitchMarks[0].x, y: pitchMarks[0].y }], notes: [pitchMarks[0].note], smoothed: true };
+          for (let i = 1; i < pitchMarks.length; i++) {
+            const gap = pitchMarks[i].x - pitchMarks[i-1].x;
+            if (gap < PX_PER_SEC * 0.6) {
+              seg.points.push({ x: pitchMarks[i].x, y: pitchMarks[i].y });
+              seg.notes.push(pitchMarks[i].note);
+            } else {
+              if (seg.points.length >= 2) lines.push(seg);
+              seg = { points: [{ x: pitchMarks[i].x, y: pitchMarks[i].y }], notes: [pitchMarks[i].note], smoothed: true };
+            }
+          }
+          if (seg.points.length >= 2) lines.push(seg);
+        }
+
+        // MARKING: 강한 음들만 점으로
+        pitchMarks
+          .filter((p, i) => i % 3 === 0 && p.rms > 0.01)
+          .forEach(p => marks.push({ x: p.x, y: p.y, note: p.note }));
+
+        drawAll();
+        bar.style.width = '100%';
+        status.textContent = '완료!';
+        setTimeout(() => { overlay.style.display = 'none'; }, 800);
+        actx.close();
+      }, 100);
+
+    }, () => {
+      status.textContent = '디코딩 실패. 다른 파일을 시도해보세요.';
+      bar.style.width = '0%';
+    });
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// 자기상관 기반 피치 추정
+function autocorrelate(buf, sampleRate) {
+  const SIZE = buf.length;
+  // 피아노 최저음 A0=27.5Hz, 최고음 C8=4186Hz
+  // offset 범위: sampleRate/4186 ~ sampleRate/27.5
+  const minOffset = Math.floor(sampleRate / 4200);
+  const maxOffset = Math.min(Math.floor(SIZE / 2), Math.floor(sampleRate / 27));
+  const MAX_SAMPLES = Math.floor(SIZE / 2);
+  let best_offset = -1, best_correlation = 0;
+  let rms = 0;
+  for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
+  rms = Math.sqrt(rms / SIZE);
+  if (rms < 0.01) return -1;
+
+  let lastCorrelation = 1;
+  for (let offset = minOffset; offset < maxOffset; offset++) {
+    let correlation = 0;
+    for (let i = 0; i < MAX_SAMPLES; i++) {
+      correlation += Math.abs(buf[i] - buf[i + offset]);
+    }
+    correlation = 1 - correlation / MAX_SAMPLES;
+    if (correlation > 0.9 && correlation > lastCorrelation) {
+      best_correlation = correlation;
+      best_offset = offset;
+    }
+    if (correlation > best_correlation) {
+      best_correlation = correlation;
+      best_offset = offset;
+    }
+    lastCorrelation = correlation;
+  }
+  if (best_correlation > 0.01 && best_offset > 0) {
+    return sampleRate / best_offset;
+  }
+  return -1;
+}
+
+// 주파수 → ALL_NOTES 중 가장 가까운 노트
+function freqToNote(freq) {
+  const A4 = 440;
+  const MIDI_A4 = 69;
+  // 주파수 → MIDI 번호
+  const midi = Math.round(MIDI_A4 + 12 * Math.log2(freq / A4));
+  const noteNames = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+  const octave = Math.floor(midi / 12) - 1; // MIDI 0 = C-1
+  const name = noteNames[((midi % 12) + 12) % 12];
+  const candidate = name + octave;
+  // ALL_NOTES에 있으면 그대로, 없으면 가장 가까운 것으로
+  if (ALL_NOTES.includes(candidate)) return candidate;
+  // 범위 클램프
+  if (midi < 21) return ALL_NOTES[0];   // A0
+  if (midi > 108) return ALL_NOTES[ALL_NOTES.length - 1]; // C8
+  return candidate;
+}
+
+// ── 엘리제를 위하여 데모 (BPM 기반) ──
+function loadElise() {
+  saveUndo();
+  clearAll();
+  hideHint();
+  scrollX = 0;
+
+  // pixelsPerBeat 기준 음표 길이 (BPM=120, 1beat=80px)
+  const S  = pixelsPerBeat / 2;        // 8분음표  = 40px
+  const S3 = pixelsPerBeat * 3 / 4;    // 점8분음표 = 60px
+  const Q  = pixelsPerBeat;            // 4분음표  = 80px
+  const DQ = pixelsPerBeat * 1.5;      // 점4분음표 = 120px
+  const H  = pixelsPerBeat * 2;        // 2분음표  = 160px
+  const W  = pixelsPerBeat * 4;        // 온음표   = 320px
+
+  // 엘리제를 위하여 — 멜로디 시퀀스 [note, duration_px]
+  // 3/8 박자 기준, BPM 맞춰 조정
+  const melody = [
+    // 마디 1
+    ['E5',S],['Eb5',S],['E5',S],['Eb5',S],['E5',S],['B4',S],['D5',S],['C5',S],
+    // 마디 2
+    ['A4',DQ],['C4',S],['E4',S],['A4',S],
+    // 마디 3
+    ['B4',DQ],['E4',S],['Ab4',S],['B4',S],
+    // 마디 4
+    ['C5',DQ],['E4',S],['E5',S],['Eb5',S],
+    // 마디 5 — 테마 반복
+    ['E5',S],['Eb5',S],['E5',S],['Eb5',S],['E5',S],['B4',S],['D5',S],['C5',S],
+    // 마디 6
+    ['A4',DQ],['C4',S],['E4',S],['A4',S],
+    // 마디 7
+    ['B4',DQ],['E4',S],['C5',S],['B4',S],
+    // 마디 8
+    ['A4',H],['B4',S],
+    // 마디 9 — B섹션
+    ['C5',S],['B4',S],['A4',S],['B4',S],['C5',S],['E5',S],
+    // 마디 10
+    ['A5',DQ],['Ab5',S],['A5',S],
+    // 마디 11
+    ['E5',S],['F5',S],['E5',S],['Eb5',S],['E5',S],['B4',S],
+    // 마디 12
+    ['D5',S],['C5',S],['B4',S],['A4',S],
+    // 마디 13 — 테마 귀환
+    ['E5',S],['Eb5',S],['E5',S],['Eb5',S],['E5',S],['B4',S],['D5',S],['C5',S],
+    // 마디 14
+    ['A4',DQ],['C4',S],['E4',S],['A4',S],
+    // 마디 15
+    ['B4',DQ],['E4',S],['Ab4',S],['B4',S],
+    // 마디 16
+    ['C5',DQ],['E4',S],['E5',S],['Eb5',S],
+    // 마디 17 — 코다
+    ['E5',S],['Eb5',S],['E5',S],['B4',S],['D5',S],['C5',S],
+    // 마디 18
+    ['A4',DQ],['C4',S],['E4',S],['A4',S],
+    // 마디 19
+    ['B4',DQ],['E4',S],['C5',S],['B4',S],
+    // 마디 20
+    ['A4',H],
+  ];
+
+  const startX = pixelsPerBeat; // 1박자 여백
+  let x = startX;
+  const linePoints = [];
+  const lineNotes  = [];
+
+  melody.forEach(([note, dur]) => {
+    const y = yOfNote(note);
+    if (y !== null) {
+      linePoints.push({ x, y });
+      lineNotes.push(note);
+      // 긴 음표는 수평선으로 뻗음
+      if (dur >= Q) {
+        linePoints.push({ x: x + dur - 2, y });
+        lineNotes.push(note);
+      }
+    }
+    x += dur;
+  });
+
+  if (linePoints.length >= 2) {
+    lines.push({ points: linePoints, notes: lineNotes, smoothed: false });
+  }
+
+  // 4분음표 이상 음은 MARKING 점으로도
+  let mx = startX;
+  melody.forEach(([note, dur]) => {
+    const y = yOfNote(note);
+    if (y !== null && dur >= Q) {
+      marks.push({ x: mx, y, note, durationBeats: dur / pixelsPerBeat });
+    }
+    mx += dur;
+  });
+
+  drawAll();
+}
+
+// ── INIT ──
 resize();
 setMode('marking');
 </script>
