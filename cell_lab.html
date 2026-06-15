@@ -353,6 +353,7 @@ function draw() {
   // 그리기 모드이거나 데이터가 있으면 피아노롤 그리드 표시
   if (_cells.size || _drawMode || _strokes.length) drawPianoRollGrid();
   if (_cells.size) drawCells();
+  if (_selectedCluster !== null) drawClusterStroke();
   if (_strokes.length) drawTraces();
   if (_region) drawRegionOutline();
   if (_drawing && _currentDrawPts.length >= 2) drawCurrentStroke();
@@ -483,6 +484,51 @@ function drawCurrentStroke() {
   ctx.restore();
 }
 
+// Cluster → 대표 Stroke 추출 (time column별 dwell 가중 pitch 중심)
+function extractClusterStroke(clusterId) {
+  const cl = _clusters[clusterId];
+  if (!cl) return [];
+  const colMap = new Map();
+  for (const key of cl.cellKeys) {
+    const cell = _cells.get(key);
+    if (!cell) continue;
+    if (!colMap.has(cell.col)) colMap.set(cell.col, { wSum: 0, pSum: 0 });
+    const e = colMap.get(cell.col);
+    e.wSum += cell.dwell;
+    e.pSum += cell.avgPitch * cell.dwell;
+  }
+  return [...colMap.keys()].sort((a, b) => a - b).map(col => {
+    const e = colMap.get(col);
+    return { time: (col + 0.5) * _cellT, pitch: e.pSum / e.wSum };
+  });
+}
+
+function drawClusterStroke() {
+  if (_selectedCluster === null) return;
+  const pts = extractClusterStroke(_selectedCluster);
+  if (pts.length < 1) return;
+  ctx.save();
+  // 선
+  if (pts.length >= 2) {
+    ctx.strokeStyle = 'rgba(80,255,200,.92)';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(tx(pts[0].time), cy(pts[0].pitch));
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(tx(pts[i].time), cy(pts[i].pitch));
+    ctx.stroke();
+  }
+  // 각 column 중심점
+  ctx.fillStyle = 'rgba(80,255,200,.75)';
+  for (const pt of pts) {
+    ctx.beginPath();
+    ctx.arc(tx(pt.time), cy(pt.pitch), 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 function drawRegionOutline() {
   const r = _region;
   const rx0 = tx(r.col0 * _cellT), rx1 = tx((r.col1 + 1) * _cellT);
@@ -529,15 +575,22 @@ function drawPitchAxis() {
 function showClusterPanel(clIdx) {
   const cl = _clusters[clIdx];
   if (!cl) { hidePanel(); return; }
+  const strokePts = extractClusterStroke(clIdx);
+  const pitchSpan = strokePts.length >= 2
+    ? Math.round(Math.max(...strokePts.map(p => p.pitch)) - Math.min(...strokePts.map(p => p.pitch)))
+    : 0;
   document.getElementById('cp-title').textContent = '⊞ Cluster 정보';
   document.getElementById('cp-body').innerHTML = `
     <div class="cp-row"><span>군집</span><strong><span class="cp-swatch" style="background:${cl.color}"></span>#${cl.id + 1}</strong></div>
     <div class="cp-row"><span>셀 수</span><strong>${cl.cellKeys.size}셀</strong></div>
     <div class="cp-row"><span>시간 범위</span><strong>${(cl.minT/1000).toFixed(2)}s – ${(cl.maxT/1000).toFixed(2)}s</strong></div>
-    <div class="cp-row"><span>지속 시간</span><strong>${(cl.maxT-cl.minT).toFixed(0)}ms</strong></div>
     <div class="cp-row"><span>체류 누적</span><strong>${cl.dwell.toFixed(0)}ms</strong></div>
     <div class="cp-row"><span>평균 음정</span><strong>${centsToNote(cl.avgPitch)}</strong></div>
     <div class="cp-row"><span>피치 범위</span><strong>${centsToNote(cl.minP)} – ${centsToNote(cl.maxP)}</strong></div>
+    <div style="margin-top:6px;padding-top:6px;border-top:1px solid #221840;">
+      <div class="cp-row"><span style="color:#40C890">추출 Stroke</span><strong style="color:#50FFD0">${strokePts.length}점</strong></div>
+      <div class="cp-row"><span style="color:#40C890">피치 이동폭</span><strong style="color:#50FFD0">${pitchSpan}¢ (${(pitchSpan/100).toFixed(1)}반음)</strong></div>
+    </div>
     <div class="cp-hint">Shift+클릭으로 영역 선택 · ✕로 해제</div>`;
   document.getElementById('cluster-panel').classList.add('show');
 }
