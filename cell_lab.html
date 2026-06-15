@@ -94,11 +94,16 @@ html, body { width: 100%; height: 100%; background: #06041A; color: #B0A0D0; fon
   <button class="tb-btn" id="res-btn-4" onclick="setDisplayMult(4)">×4</button>
   <div class="tb-res-info" id="res-info">—</div>
   <div class="tb-sep"></div>
+  <label class="tb-lbl">MODE</label>
+  <button class="tb-btn active" id="btn-view-mode" onclick="setMode('view')">👁 보기</button>
+  <button class="tb-btn" id="btn-draw-mode" onclick="setMode('draw')">✏ 그리기</button>
+  <button class="tb-btn" id="btn-undo-stroke" onclick="undoLastStroke()" style="display:none">↩ 취소</button>
+  <div class="tb-sep"></div>
   <label class="tb-lbl">ZOOM</label>
   <button class="tb-btn" onclick="zoomBy(1.5)">+</button>
   <button class="tb-btn" onclick="zoomBy(1/1.5)">−</button>
   <button class="tb-btn" onclick="fitView()">FIT</button>
-  <span class="tb-hint">클릭=군집 선택 · Shift+클릭=영역 선택 · Alt+드래그=이동 · 휠=줌 · Shift+휠=피치줌</span>
+  <span class="tb-hint" id="tb-hint">클릭=군집 선택 · Shift+클릭=영역 선택 · Alt+드래그=이동 · 휠=줌</span>
 </div>
 
 <div id="layout">
@@ -157,6 +162,11 @@ let _cellP = 100;           // cents (표시 단위)
 let _selectedCluster = null;
 let _anchor = null;         // {col,row} — shift-click anchor
 let _region = null;         // {col0,row0,col1,row1}
+
+// 그리기 모드
+let _drawMode = false;
+let _drawing  = false;
+let _currentDrawPts = [];   // 진행 중인 stroke pts (확정 전)
 
 /* ═══════════════════════════════
    VIEW
@@ -340,12 +350,12 @@ function draw() {
   ctx.fillStyle = '#06041A';
   ctx.fillRect(0, 0, W, H);
 
-  if (_cells.size) {
-    drawPianoRollGrid();
-    drawCells();
-    drawLMHTrace();
-    if (_region) drawRegionOutline();
-  }
+  // 그리기 모드이거나 데이터가 있으면 피아노롤 그리드 표시
+  if (_cells.size || _drawMode || _strokes.length) drawPianoRollGrid();
+  if (_cells.size) drawCells();
+  if (_strokes.length) drawTraces();
+  if (_region) drawRegionOutline();
+  if (_drawing && _currentDrawPts.length >= 2) drawCurrentStroke();
 
   drawPitchAxis();
 }
@@ -433,16 +443,17 @@ function drawCells() {
   ctx.restore();
 }
 
-function drawLMHTrace() {
-  if (!_strokes.length) return;
+function drawTraces() {
   ctx.save();
-  ctx.strokeStyle = 'rgba(255,255,255,.45)';
-  ctx.lineWidth = 1.5;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   for (const stroke of _strokes) {
     const pts = stroke.pts || [];
     if (!pts.length) continue;
+    // manual = 따뜻한 오렌지, hum/LMH = 흰색
+    const isManual = stroke.source === 'manual';
+    ctx.strokeStyle = isManual ? 'rgba(255,160,60,.7)' : 'rgba(255,255,255,.42)';
+    ctx.lineWidth = isManual ? 1.8 : 1.5;
     ctx.beginPath();
     let started = false;
     for (const pt of pts) {
@@ -451,6 +462,24 @@ function drawLMHTrace() {
     }
     ctx.stroke();
   }
+  ctx.restore();
+}
+
+function drawCurrentStroke() {
+  if (_currentDrawPts.length < 2) return;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,210,80,.9)';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  let started = false;
+  for (const pt of _currentDrawPts) {
+    const x = tx(pt.time), y = cy(pt.pitch);
+    if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -541,6 +570,38 @@ function hidePanel() { document.getElementById('cluster-panel').classList.remove
 function clearSelection() {
   _selectedCluster = null; _anchor = null; _region = null;
   hidePanel(); closeZoom(); draw();
+}
+
+function setMode(mode) {
+  _drawMode = (mode === 'draw');
+  _drawing = false; _currentDrawPts = [];
+  document.getElementById('btn-view-mode').classList.toggle('active', !_drawMode);
+  document.getElementById('btn-draw-mode').classList.toggle('active', _drawMode);
+  document.getElementById('tb-hint').textContent = _drawMode
+    ? '드래그로 자유곡선 그리기 · 손 떼면 Cell 변환 · Alt+드래그=이동'
+    : '클릭=군집 선택 · Shift+클릭=영역 선택 · Alt+드래그=이동 · 휠=줌';
+  mc.style.cursor = _drawMode ? 'crosshair' : 'default';
+  if (!_drawMode) clearSelection();
+  else draw();
+}
+
+function undoLastStroke() {
+  // manual stroke만 취소 (LMH는 보존)
+  const idx = [..._strokes].reverse().findIndex(s => s.source === 'manual');
+  if (idx === -1) return;
+  _strokes.splice(_strokes.length - 1 - idx, 1);
+  _internalCells = _strokes.length
+    ? buildCellGrid(_strokes, _internalCellT, _internalCellP)
+    : new Map();
+  if (_internalCells.size) {
+    setDisplayMult(_displayMult);
+  } else {
+    _cells = new Map(); _clusters = [];
+    hidePanel(); closeZoom(); draw();
+  }
+  const hasManual = _strokes.some(s => s.source === 'manual');
+  document.getElementById('btn-undo-stroke').style.display = hasManual ? 'block' : 'none';
+  toast('↩ 마지막 수동 stroke 취소');
 }
 
 /* ═══════════════════════════════
@@ -757,7 +818,7 @@ mc.addEventListener('pointerdown', e => {
   const r = mc.getBoundingClientRect();
   const cx = e.clientX - r.left, cy_px = e.clientY - r.top;
 
-  // Pan: middle-button or alt+left
+  // Pan: 중간 버튼 또는 Alt+왼쪽 (모든 모드 공통)
   if (e.button === 1 || (e.button === 0 && e.altKey)) {
     _isPan = true;
     _panMs = V.scrollMs; _panX = e.clientX;
@@ -765,12 +826,21 @@ mc.addEventListener('pointerdown', e => {
     mc.setPointerCapture(e.pointerId);
     return;
   }
-  if (e.button !== 0 || !_cells.size) return;
+  if (e.button !== 0) return;
 
+  // ── 그리기 모드 ──
+  if (_drawMode) {
+    _drawing = true;
+    _currentDrawPts = [{ time: xt(cx), pitch: yc(cy_px) }];
+    mc.setPointerCapture(e.pointerId);
+    return;
+  }
+
+  // ── 보기 모드: Cell/Cluster 선택 ──
+  if (!_cells.size) return;
   const t = xt(cx), p = yc(cy_px);
   const col = Math.floor(t / _cellT), row = Math.floor(p / _cellP);
   const key = `${col},${row}`;
-
   if (_cells.has(key)) {
     if (e.shiftKey && _anchor) {
       _region = {
@@ -792,14 +862,46 @@ mc.addEventListener('pointerdown', e => {
 });
 
 mc.addEventListener('pointermove', e => {
-  if (!_isPan) return;
-  V.scrollMs = _panMs - (e.clientX - _panX) / V.zoom;
-  V.pitchCent = _panPitch + (e.clientY - _panY) / V.pitchZoom;
-  draw();
+  if (_isPan) {
+    V.scrollMs = _panMs - (e.clientX - _panX) / V.zoom;
+    V.pitchCent = _panPitch + (e.clientY - _panY) / V.pitchZoom;
+    draw(); return;
+  }
+  if (!_drawing || !_drawMode) return;
+  const r = mc.getBoundingClientRect();
+  const cx = e.clientX - r.left, cy_px = e.clientY - r.top;
+  const t = xt(cx), p = yc(cy_px);
+  // 중복 pt 방지: 이전 pt와 조금이라도 달라야 추가
+  const last = _currentDrawPts[_currentDrawPts.length - 1];
+  if (!last || Math.abs(t - last.time) > 0.1 || Math.abs(p - last.pitch) > 0.5) {
+    _currentDrawPts.push({ time: t, pitch: p });
+    draw();
+  }
 });
 
-mc.addEventListener('pointerup', () => { _isPan = false; });
-mc.addEventListener('pointercancel', () => { _isPan = false; });
+mc.addEventListener('pointerup', e => {
+  if (_isPan) { _isPan = false; return; }
+  if (_drawing && _drawMode) {
+    _drawing = false;
+    if (_currentDrawPts.length >= 2) {
+      _strokes.push({ pts: _currentDrawPts, source: 'manual' });
+      _currentDrawPts = [];
+      document.getElementById('empty-msg').style.display = 'none';
+      document.getElementById('btn-undo-stroke').style.display = 'block';
+      // 내부 셀 재빌드 → 표시 업데이트
+      _internalCells = buildCellGrid(_strokes, _internalCellT, _internalCellP);
+      setDisplayMult(_displayMult);
+    } else {
+      _currentDrawPts = [];
+      draw();
+    }
+  }
+});
+
+mc.addEventListener('pointercancel', () => {
+  _isPan = false;
+  _drawing = false; _currentDrawPts = []; draw();
+});
 
 mc.addEventListener('wheel', e => {
   e.preventDefault();
