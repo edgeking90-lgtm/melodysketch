@@ -225,8 +225,11 @@ button{cursor:pointer;font-family:inherit;font-size:11px;border:none;border-radi
 
 /* ── Metronome controls ── */
 .btn-metro{background:#1A2038;color:#7888C8;border:1px solid #2A3060;}
+.btn-beat{background:#201818;color:#C07050;border:1px solid #402820;}
 .btn-metro:hover{background:#222850;color:#A0B0E0;}
 .btn-metro.on{background:#142820;color:#60D090;border-color:#2A5840;box-shadow:0 0 8px #60D09044;}
+.btn-beat:hover{background:#301808;color:#E09060;}
+.btn-beat.on{background:#301008;color:#FF7840;border-color:#A04020;box-shadow:0 0 10px #FF784060;}
 .metro-adj{background:#181628;color:#6060A0;border:1px solid #252348;width:20px;height:22px;padding:0;font-size:13px;line-height:1;border-radius:3px;}
 .metro-adj:hover{background:#28244A;color:#C0B8F0;}
 .metro-bpm-in{width:44px;text-align:center;background:#181628;border:1px solid #252348;color:#9090C8;border-radius:3px;font-size:10px;height:22px;padding:0 2px;font-family:inherit;-moz-appearance:textfield;}
@@ -401,6 +404,8 @@ body.skin-sketchbook .autoscroll-btn{background:#E4DCC8;color:#6A5030;border-col
 body.skin-sketchbook .autoscroll-btn.active{background:#CCE0E8;color:#1A4068;border-color:#5890A8;}
 body.skin-sketchbook .btn-metro{background:#D8EDE4;color:#1A5838;border-color:#80B898;}
 body.skin-sketchbook .btn-metro.on{background:#C0E8D4;color:#0A4028;border-color:#488870;box-shadow:0 0 8px rgba(80,180,120,.3);}
+body.skin-sketchbook .btn-beat{background:#F0DDD0;color:#A04020;border-color:#C08060;}
+body.skin-sketchbook .btn-beat.on{background:#F8C0A0;color:#802010;border-color:#C05030;box-shadow:0 0 8px rgba(200,80,30,.3);}
 body.skin-sketchbook .metro-adj,.metro-bpm-in,.metro-sig{background:#E4DCC8;border-color:#C0A870;color:#3A2810;}
 body.skin-sketchbook .flow-strength-slider,.flow-opacity-slider,.metro-vol{background:#D0C4A0;}
 body.skin-sketchbook #side-toolbar{background:#DDD5C0;border-color:#C0A870;}
@@ -489,6 +494,8 @@ body.skin-neon .autoscroll-btn{background:#080820;color:#304080;border-color:#10
 body.skin-neon .autoscroll-btn.active{background:#081838;color:#00DCFF;border-color:#0050A8;}
 body.skin-neon .btn-metro{background:#080820;color:#4060C0;border-color:#0A1840;}
 body.skin-neon .btn-metro.on{background:#063010;color:#00FF88;border-color:#085828;box-shadow:0 0 10px #00FF8844;}
+body.skin-neon .btn-beat{background:#100808;color:#FF5030;border-color:#300818;}
+body.skin-neon .btn-beat.on{background:#200800;color:#FF4020;border-color:#700818;box-shadow:0 0 14px #FF402066;}
 body.skin-neon .flow-strength-slider,.flow-opacity-slider,.metro-vol{background:#0A0828;}
 body.skin-neon #side-toolbar{background:#040412;border-color:#080830;}
 body.skin-neon .stb-btn{background:#070718;border-color:#0A1040;color:#3848A8;}
@@ -640,6 +647,9 @@ body.skin-neon #minimap-label{color:#2838A0;}
     </select>
     <input id="metro-vol-input" class="metro-vol" type="range" min="0" max="100" value="80"
       oninput="setMetroVol(+this.value/100)">
+    <div class="tb-sep"></div>
+    <span class="tb-lbl">BEAT</span>
+    <button id="btn-beat" class="btn-beat" onclick="toggleBeat()">🥁 OFF</button>
   </div>
 </div>
 
@@ -1716,13 +1726,94 @@ function setMetroVol(v){_metroVol=Math.max(0,Math.min(1,v));}
 
 function setMetroTimeSig(sig){
   _metroTimeSig=sig;
-  _metroBeatIndex=0; // 박자 변경 시 인덱스 리셋
+  _metroBeatIndex=0;
+  _beatIndex=0;
+}
+
+/* ═══════════════════════════════════════════
+   SIMPLE BEAT
+═══════════════════════════════════════════ */
+let _beatOn=false,_beatSchedId=null,_beatNextAcTime=0,_beatIndex=0;
+const BEAT_PATTERNS={'4/4':['kick','hihat','snare','hihat'],'3/4':['kick','hihat','snare'],'6/8':['kick','hihat','hihat','snare','hihat','hihat']};
+
+function _synthKick(t){
+  if(!audioCtx)return;
+  const o=audioCtx.createOscillator(),e=audioCtx.createGain();
+  o.type='sine';o.frequency.setValueAtTime(100,t);o.frequency.exponentialRampToValueAtTime(38,t+0.08);
+  e.gain.setValueAtTime(1.5,t);e.gain.exponentialRampToValueAtTime(0.001,t+0.22);
+  o.connect(e);e.connect(audioCtx.destination);o.start(t);o.stop(t+0.25);
+  const sz=Math.ceil(audioCtx.sampleRate*0.04),nb=audioCtx.createBuffer(1,sz,audioCtx.sampleRate);
+  const nd=nb.getChannelData(0);for(let i=0;i<sz;i++)nd[i]=(Math.random()*2-1)*0.6;
+  const ns=audioCtx.createBufferSource(),ne=audioCtx.createGain();
+  ns.buffer=nb;ne.gain.setValueAtTime(0.8,t);ne.gain.exponentialRampToValueAtTime(0.001,t+0.04);
+  ns.connect(ne);ne.connect(audioCtx.destination);ns.start(t);
+}
+function _synthSnare(t){
+  if(!audioCtx)return;
+  const dur=0.14,sz=Math.ceil(audioCtx.sampleRate*dur),nb=audioCtx.createBuffer(1,sz,audioCtx.sampleRate);
+  const nd=nb.getChannelData(0);for(let i=0;i<sz;i++)nd[i]=Math.random()*2-1;
+  const ns=audioCtx.createBufferSource(),hp=audioCtx.createBiquadFilter(),ne=audioCtx.createGain();
+  hp.type='highpass';hp.frequency.value=1200;
+  ns.buffer=nb;ne.gain.setValueAtTime(1.0,t);ne.gain.exponentialRampToValueAtTime(0.001,t+dur);
+  ns.connect(hp);hp.connect(ne);ne.connect(audioCtx.destination);ns.start(t);
+  const oo=audioCtx.createOscillator(),oe=audioCtx.createGain();
+  oo.type='triangle';oo.frequency.value=220;
+  oe.gain.setValueAtTime(0.6,t);oe.gain.exponentialRampToValueAtTime(0.001,t+0.06);
+  oo.connect(oe);oe.connect(audioCtx.destination);oo.start(t);oo.stop(t+0.07);
+}
+function _synthHihat(t){
+  if(!audioCtx)return;
+  const dur=0.05,sz=Math.ceil(audioCtx.sampleRate*dur),nb=audioCtx.createBuffer(1,sz,audioCtx.sampleRate);
+  const nd=nb.getChannelData(0);for(let i=0;i<sz;i++)nd[i]=Math.random()*2-1;
+  const ns=audioCtx.createBufferSource(),hp=audioCtx.createBiquadFilter(),ne=audioCtx.createGain();
+  hp.type='highpass';hp.frequency.value=8000;
+  ns.buffer=nb;ne.gain.setValueAtTime(0.5,t);ne.gain.exponentialRampToValueAtTime(0.001,t+dur);
+  ns.connect(hp);hp.connect(ne);ne.connect(audioCtx.destination);ns.start(t);
+}
+function _beatScheduler(){
+  if(!_beatOn||!audioCtx)return;
+  const pat=BEAT_PATTERNS[_metroTimeSig]||BEAT_PATTERNS['4/4'];
+  const beatSec=metroBeatSec(),now=audioCtx.currentTime;
+  while(_beatNextAcTime<now+METRO_LOOKAHEAD){
+    const d=pat[_beatIndex%pat.length];
+    if(d==='kick')_synthKick(_beatNextAcTime);
+    else if(d==='snare')_synthSnare(_beatNextAcTime);
+    else _synthHihat(_beatNextAcTime);
+    _beatIndex=(_beatIndex+1)%pat.length;
+    _beatNextAcTime+=beatSec;
+  }
+}
+function startBeat(zeroAcTime){
+  stopBeat();if(!_beatOn)return;
+  ensureAudio();_beatIndex=0;_beatNextAcTime=zeroAcTime;
+  _beatScheduler();_beatSchedId=setInterval(_beatScheduler,METRO_SCHED_MS);
+}
+function stopBeat(){if(_beatSchedId!==null){clearInterval(_beatSchedId);_beatSchedId=null;}}
+function toggleBeat(){
+  _beatOn=!_beatOn;
+  const btn=document.getElementById('btn-beat');
+  if(btn){btn.textContent=_beatOn?'🥁 ON':'🥁 OFF';btn.classList.toggle('on',_beatOn);}
+  if(_beatOn){
+    ensureAudio();
+    if(_phState&&audioCtx){
+      const nowMs=(audioCtx.currentTime-_phState.acTime0)*1000+(_phState.ms0||0);
+      const beatMs=metroBeatSec()*1000;
+      const pat=BEAT_PATTERNS[_metroTimeSig]||BEAT_PATTERNS['4/4'];
+      const nextBeatMs=Math.ceil(nowMs/beatMs)*beatMs;
+      const nextAcTime=_phState.acTime0+(nextBeatMs-(_phState.ms0||0))/1000;
+      stopBeat();
+      _beatIndex=Math.round(nextBeatMs/beatMs)%pat.length;
+      _beatNextAcTime=nextAcTime;
+      _beatScheduler();_beatSchedId=setInterval(_beatScheduler,METRO_SCHED_MS);
+    }else{startBeat(audioCtx.currentTime+0.06);_startMetroRaf();}
+  }else{stopBeat();if(!_metroOn)_stopMetroRaf();}
 }
 
 function stopAll(){
   _activeSrcs.forEach(s=>{try{s.stop();}catch(e){}});_activeSrcs=[];
   stopPlayhead();
   stopMetro();
+  stopBeat();
   document.getElementById('btn-stop').disabled=true;
   document.querySelectorAll('.btn-lmh,.btn-gesture,.btn-core').forEach(b=>b.classList.remove('playing'));
   draw();
@@ -1738,6 +1829,10 @@ function startPlayhead(t0Ac,ms0){
   if(_metroOn){
     const songZeroAcTime=t0Ac-(ms0||0)/1000;
     startMetro(songZeroAcTime);
+  }
+  if(_beatOn){
+    const songZeroAcTime=t0Ac-(ms0||0)/1000;
+    startBeat(songZeroAcTime);
   }
   function loop(){
     if(!_phState)return;
