@@ -104,6 +104,21 @@ body.skin-sketchbook .ccp-hdr{border-color:#C0A870;}body.skin-sketchbook .ccp-ti
 body.skin-sketchbook .ccp-row span{color:#9A7848;}body.skin-sketchbook .ccp-row strong{color:#2A1810;}
 body.skin-neon #cell-cluster-panel{background:rgba(4,4,16,.95);border-color:#200840;}
 body.skin-neon .ccp-title{color:#C040FF;}body.skin-neon .ccp-row strong{color:#80E0FF;}
+.ccp-zoom-btn{margin-top:5px;width:100%;padding:5px 0;background:#221650;border:1px solid #4828A0;border-radius:5px;color:#B898F0;font-size:10px;cursor:pointer;transition:background .12s;}
+.ccp-zoom-btn:hover{background:#322080;}
+/* ── Cell Zoom Panel ── */
+#cell-zoom-panel{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  z-index:200;display:none;background:rgba(8,6,22,.97);border:1px solid #5030A0;
+  border-radius:10px;overflow:hidden;box-shadow:0 8px 32px #00000090;}
+#cell-zoom-panel.show{display:block;}
+.czp-hdr{display:flex;align-items:center;gap:8px;padding:7px 12px;
+  border-bottom:1px solid #2A1860;background:rgba(20,12,48,.8);}
+.czp-title{font-size:11px;color:#9060E0;font-weight:600;letter-spacing:.05em;flex:1;}
+.czp-size{font-size:10px;color:#504080;}
+.czp-close{background:none;border:none;color:#504080;cursor:pointer;font-size:14px;padding:0;line-height:1;}
+.czp-close:hover{color:#E06080;}
+#czp-canvas{display:block;}
+.czp-footer{padding:5px 12px;font-size:9px;color:#403060;border-top:1px solid #1A1040;}
 
 /* ── Side Toolbar ── */
 #side-toolbar{width:40px;flex-shrink:0;background:#0D0B1E;border-right:1px solid #1A1830;display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:4px;z-index:100;user-select:none;}
@@ -786,6 +801,15 @@ body.skin-neon #minimap-label{color:#2838A0;}
         <button class="ccp-close" onclick="clearCellSelection()">✕</button>
       </div>
       <div class="ccp-body" id="ccp-body"></div>
+    </div>
+    <div id="cell-zoom-panel">
+      <div class="czp-hdr">
+        <span class="czp-title">⊡ Cell 확대</span>
+        <span class="czp-size" id="czp-size"></span>
+        <button class="czp-close" onclick="closeCellZoom()">✕</button>
+      </div>
+      <canvas id="czp-canvas" width="480" height="320"></canvas>
+      <div class="czp-footer" id="czp-footer"></div>
     </div>
     <div id="join-mode-panel">
       <span class="trp-label">⛓ Join</span>
@@ -1630,10 +1654,7 @@ const METRO_SCHED_MS=40;
 /* ═══════════════════════════════════════════
    GRID CELLS — 허밍의 최소 입자
 ═══════════════════════════════════════════ */
-const CELL_T_MS=60;   // ms per time column
-const CELL_P_C =50;   // cents per pitch row
-
-function buildCellGrid(strokes){
+function buildCellGrid(strokes, cellT, cellP){
   const cells=new Map();
   for(const stroke of strokes){
     const pts=stroke.pts||[];
@@ -1644,8 +1665,8 @@ function buildCellGrid(strokes){
       const dwellPer=dt/n;
       for(let j=0;j<=n;j++){
         const f=j/n,t=t0+f*dt,p=p0+f*(p1-p0);
-        const col=Math.floor(t/CELL_T_MS);
-        const row=Math.floor(p/CELL_P_C);
+        const col=Math.floor(t/cellT);
+        const row=Math.floor(p/cellP);
         const key=`${col},${row}`;
         if(!cells.has(key))cells.set(key,{col,row,dwell:0,pAcc:0,pN:0,dAcc:0,pVals:[]});
         const c=cells.get(key);
@@ -1659,13 +1680,13 @@ function buildCellGrid(strokes){
     c.avgDir=(c.dAcc/c.pN)*(180/Math.PI);
     const m=c.avgPitch;
     c.vibration=Math.sqrt(c.pVals.reduce((s,v)=>s+(v-m)*(v-m),0)/c.pVals.length);
-    c.confidence=Math.min(1,c.dwell/CELL_T_MS);
+    c.confidence=Math.min(1,c.dwell/cellT);
     delete c.pAcc;delete c.pN;delete c.dAcc;delete c.pVals;
   }
   return cells;
 }
 
-function detectClusters(cells){
+function detectClusters(cells, cellT, cellP){
   const PAL=['#FF6070','#60B8FF','#80E860','#FFB840','#C070FF','#40DCC0','#FF9860','#88AAFF'];
   const visited=new Set();const clusters=[];
   for(const key of cells.keys()){
@@ -1680,10 +1701,10 @@ function detectClusters(cells){
       visited.add(k);cl.cellKeys.add(k);
       const c=cells.get(k);c.clusterId=cl.id;
       cl.dwell+=c.dwell;
-      cl.minT=Math.min(cl.minT,c.col*CELL_T_MS);
-      cl.maxT=Math.max(cl.maxT,(c.col+1)*CELL_T_MS);
-      cl.minP=Math.min(cl.minP,c.row*CELL_P_C);
-      cl.maxP=Math.max(cl.maxP,(c.row+1)*CELL_P_C);
+      cl.minT=Math.min(cl.minT,c.col*cellT);
+      cl.maxT=Math.max(cl.maxT,(c.col+1)*cellT);
+      cl.minP=Math.min(cl.minP,c.row*cellP);
+      cl.maxP=Math.max(cl.maxP,(c.row+1)*cellP);
       cl.pAcc+=c.avgPitch;cl.pN++;
       const [col,row]=k.split(',').map(Number);
       for(let dc=-1;dc<=1;dc++)for(let dr=-1;dr<=1;dr++){
@@ -1702,6 +1723,7 @@ function detectClusters(cells){
 function drawGridCellLayer(layer){
   const cells=layer.cells;
   if(!cells||!cells.size)return;
+  const cT=layer.cellT||60,cP=layer.cellP||100;
   const W=mc.clientWidth,H=mc.clientHeight;
   let maxDwell=0;
   for(const c of cells.values())if(c.dwell>maxDwell)maxDwell=c.dwell;
@@ -1711,8 +1733,8 @@ function drawGridCellLayer(layer){
   ctx.save();
   ctx.globalAlpha=layer.opacity;
   for(const [key,c] of cells){
-    const x0=tx(c.col*CELL_T_MS),x1=tx((c.col+1)*CELL_T_MS);
-    const yTop=cy((c.row+1)*CELL_P_C),yBot=cy(c.row*CELL_P_C);
+    const x0=tx(c.col*cT),x1=tx((c.col+1)*cT);
+    const yTop=cy((c.row+1)*cP),yBot=cy(c.row*cP);
     if(x1<GUTTER||x0>W||yBot<0||yTop>H)continue;
     const alpha=0.12+0.72*(c.dwell/maxDwell);
     const isSelected=selId!==null&&clusters[selId]?.cellKeys.has(key);
@@ -1724,10 +1746,22 @@ function drawGridCellLayer(layer){
       ctx.strokeRect(x0,yTop,x1-x0,yBot-yTop);
     }else{
       const clCol=clusters[c.clusterId??0]?.color||'#8080C0';
-      const r=parseInt(clCol.slice(1,3),16),g=parseInt(clCol.slice(3,5),16),b=parseInt(clCol.slice(5,7),16);
-      ctx.fillStyle=`rgba(${r},${g},${b},${alpha})`;
+      const rv=parseInt(clCol.slice(1,3),16),gv=parseInt(clCol.slice(3,5),16),bv=parseInt(clCol.slice(5,7),16);
+      ctx.fillStyle=`rgba(${rv},${gv},${bv},${alpha})`;
       ctx.fillRect(x0,yTop,x1-x0,yBot-yTop);
     }
+  }
+  // Draw selected region outline
+  if(_cellRegion&&_cellRegion.layerId===layer.id){
+    const rg=_cellRegion;
+    const rx0=tx(rg.col0*cT),rx1=tx((rg.col1+1)*cT);
+    const ry0=cy((rg.row1+1)*cP),ry1=cy(rg.row0*cP);
+    ctx.globalAlpha=1;
+    ctx.strokeStyle='rgba(200,160,255,.9)';
+    ctx.lineWidth=2;
+    ctx.setLineDash([4,3]);
+    ctx.strokeRect(rx0,ry0,rx1-rx0,ry1-ry0);
+    ctx.setLineDash([]);
   }
   ctx.restore();
 }
@@ -1749,15 +1783,148 @@ function showClusterPanel(layer){
     <div class="ccp-row"><span>체류 누적</span><strong>${cl.dwell.toFixed(0)}ms</strong></div>
     <div class="ccp-row"><span>평균 음정</span><strong>${centsToNote(cl.avgPitch)} (${cl.avgPitch>0?'+':''}${cl.avgPitch.toFixed(0)}¢)</strong></div>
     <div class="ccp-row"><span>피치 범위</span><strong>${pitchRange}</strong></div>
-    <div class="ccp-hint">셀을 클릭해 군집을 선택 · ✕로 해제</div>`;
+    <div class="ccp-hint">Shift+클릭으로 영역 선택 · ✕로 해제</div>`;
   panel.classList.add('show');
 }
 
 function clearCellSelection(){
   const gcLayer=_layers.find(l=>l.type==='grid-cells');
   if(gcLayer)gcLayer.selectedCluster=null;
+  _cellAnchor=null;_cellRegion=null;
   document.getElementById('cell-cluster-panel')?.classList.remove('show');
+  closeCellZoom();
   draw();
+}
+
+let _cellAnchor=null;  // {col, row, layerId} — first shift-click anchor
+let _cellRegion=null;  // {col0, row0, col1, row1, layerId} — selected rectangle
+
+function updateClusterPanelForRegion(gcLayer){
+  const panel=document.getElementById('cell-cluster-panel');
+  if(!panel)return;
+  const r=_cellRegion;
+  if(!r){panel.classList.remove('show');return;}
+  const cT=gcLayer.cellT||60,cP=gcLayer.cellP||100;
+  const cols=r.col1-r.col0+1,rows=r.row1-r.row0+1;
+  let cellCount=0,totalDwell=0;
+  for(let c=r.col0;c<=r.col1;c++)for(let rr=r.row0;rr<=r.row1;rr++){
+    const cell=gcLayer.cells.get(`${c},${rr}`);
+    if(cell){cellCount++;totalDwell+=cell.dwell;}
+  }
+  const tMin=r.col0*cT,tMax=(r.col1+1)*cT;
+  const pMin=r.row0*cP,pMax=(r.row1+1)*cP;
+  document.getElementById('ccp-body').innerHTML=`
+    <div class="ccp-row"><span>선택 영역</span><strong>${cols}×${rows} 셀</strong></div>
+    <div class="ccp-row"><span>활성 셀</span><strong>${cellCount}개</strong></div>
+    <div class="ccp-row"><span>시간</span><strong>${(tMin/1000).toFixed(2)}s – ${(tMax/1000).toFixed(2)}s</strong></div>
+    <div class="ccp-row"><span>피치</span><strong>${centsToNote(pMin)} – ${centsToNote(pMax)}</strong></div>
+    <div class="ccp-row"><span>체류 합계</span><strong>${totalDwell.toFixed(0)}ms</strong></div>
+    <button class="ccp-zoom-btn" onclick="openCellZoom()">⊡ 확대 보기</button>
+    <div class="ccp-hint">Shift+클릭으로 영역 조정 · 첫 클릭=기준점</div>`;
+  panel.classList.add('show');
+}
+
+function openCellZoom(){
+  if(!_cellRegion)return;
+  const gcLayer=_layers.find(l=>l.id===_cellRegion.layerId&&l.type==='grid-cells');
+  if(!gcLayer)return;
+  renderCellZoom(gcLayer);
+  document.getElementById('cell-zoom-panel')?.classList.add('show');
+}
+
+function closeCellZoom(){
+  document.getElementById('cell-zoom-panel')?.classList.remove('show');
+}
+
+function renderCellZoom(gcLayer){
+  const czc=document.getElementById('czp-canvas');
+  if(!czc)return;
+  const ctx2=czc.getContext('2d');
+  const W=czc.width,H=czc.height;
+  const r=_cellRegion;
+  if(!r)return;
+  const cT=gcLayer.cellT||60,cP=gcLayer.cellP||100;
+  const cols=r.col1-r.col0+1,rows=r.row1-r.row0+1;
+  const cellW=W/cols,cellH=H/rows;
+  const sz=document.getElementById('czp-size');
+  if(sz)sz.textContent=`${cols}×${rows} · ${(cols*cT/1000).toFixed(2)}s × ${rows}반음`;
+  ctx2.clearRect(0,0,W,H);
+  ctx2.fillStyle='#06041A';
+  ctx2.fillRect(0,0,W,H);
+  let maxDwell=0;
+  for(let c=r.col0;c<=r.col1;c++)for(let rr=r.row0;rr<=r.row1;rr++){
+    const cell=gcLayer.cells.get(`${c},${rr}`);
+    if(cell&&cell.dwell>maxDwell)maxDwell=cell.dwell;
+  }
+  for(let c=r.col0;c<=r.col1;c++){
+    for(let rr=r.row0;rr<=r.row1;rr++){
+      const bx=(c-r.col0)*cellW,by=(r.row1-rr)*cellH;
+      ctx2.strokeStyle='rgba(80,60,140,.35)';
+      ctx2.lineWidth=.5;
+      ctx2.strokeRect(bx+.5,by+.5,cellW-1,cellH-1);
+      const cell=gcLayer.cells.get(`${c},${rr}`);
+      if(!cell)continue;
+      const alpha=0.15+0.75*(cell.dwell/(maxDwell||1));
+      const clCol=gcLayer.clusters[cell.clusterId??0]?.color||'#8080C0';
+      const rv=parseInt(clCol.slice(1,3),16),gv=parseInt(clCol.slice(3,5),16),bv=parseInt(clCol.slice(5,7),16);
+      ctx2.fillStyle=`rgba(${rv},${gv},${bv},${alpha})`;
+      ctx2.fillRect(bx+1,by+1,cellW-2,cellH-2);
+      if(cellH>18){
+        ctx2.fillStyle='rgba(255,255,255,.6)';
+        ctx2.font=`bold ${Math.min(cellH*.3,13)}px sans-serif`;
+        ctx2.textAlign='center';
+        ctx2.textBaseline='middle';
+        ctx2.fillText(centsToNote(cell.avgPitch),bx+cellW*.5,by+cellH*.5);
+      }
+      const barW=(cellW-4)*(cell.dwell/(maxDwell||1));
+      ctx2.fillStyle=`rgba(${rv},${gv},${bv},.95)`;
+      ctx2.fillRect(bx+2,by+cellH-4,barW,3);
+      if(cell.vibration>10&&cellW>24){
+        const dotR=Math.min(cellW,cellH)*.09*Math.min(1,cell.vibration/60);
+        ctx2.beginPath();
+        ctx2.arc(bx+cellW*.8,by+cellH*.2,dotR,0,Math.PI*2);
+        ctx2.fillStyle='rgba(255,200,80,.7)';
+        ctx2.fill();
+      }
+    }
+  }
+  const tMin=r.col0*cT,tMax=(r.col1+1)*cT;
+  const pMin=r.row0*cP,pMax=(r.row1+1)*cP;
+  const toX=t=>((t-tMin)/(tMax-tMin))*W;
+  const toY=p=>H-((p-pMin)/(pMax-pMin))*H;
+  const lmhStrokes=_layers.filter(l=>l.visible&&l.type==='lmh'&&l.strokes?.length)
+    .flatMap(l=>l.strokes);
+  ctx2.strokeStyle='rgba(255,255,255,.75)';
+  ctx2.lineWidth=1.8;
+  ctx2.lineCap='round';
+  ctx2.lineJoin='round';
+  for(const stroke of lmhStrokes){
+    const relevant=stroke.pts.filter(pt=>pt.time>=tMin&&pt.time<=tMax);
+    if(!relevant.length)continue;
+    ctx2.beginPath();
+    let started=false;
+    for(const pt of relevant){
+      const px=toX(pt.time),py=toY(pt.pitch);
+      if(!started){ctx2.moveTo(px,py);started=true;}else ctx2.lineTo(px,py);
+    }
+    ctx2.stroke();
+  }
+  ctx2.font='9px sans-serif';
+  ctx2.fillStyle='rgba(140,100,200,.65)';
+  ctx2.textBaseline='top';
+  for(let c=r.col0;c<=r.col1+1;c++){
+    const x=(c-r.col0)*cellW;
+    ctx2.textAlign='center';
+    ctx2.fillText(`${(c*cT/1000).toFixed(2)}s`,Math.max(16,Math.min(W-16,x)),2);
+  }
+  ctx2.textAlign='left';
+  ctx2.textBaseline='middle';
+  for(let rr=r.row0;rr<=r.row1+1;rr++){
+    const y=(r.row1+1-rr)*cellH;
+    ctx2.fillText(centsToNote(rr*cP),2,Math.max(6,Math.min(H-6,y)));
+  }
+  const footer=document.getElementById('czp-footer');
+  if(footer)footer.textContent=`셀: ${cT}ms × ${cP}¢ (1박 × 1반음)  |  흰 선 = LMH 원본 피치`;
 }
 
 function metroBeatSec(){return 60/_metroBPM;}
@@ -3161,11 +3328,13 @@ function addLayerByType(type){
     const srcStrokes=_layers.filter(l=>l.visible&&l.type==='lmh'&&l.strokes?.length)
       .flatMap(l=>l.strokes);
     if(!srcStrokes.length){toast('LMH 레이어(허밍 원본)가 필요합니다');return;}
-    const cells=buildCellGrid(srcStrokes);
+    const cellT=Math.round(60000/_metroBPM); // 1박 = 1비트 길이
+    const cellP=100; // 1반음 = 100 cents
+    const cells=buildCellGrid(srcStrokes,cellT,cellP);
     if(!cells.size){toast('셀 생성 실패');return;}
-    const clusters=detectClusters(cells);
+    const clusters=detectClusters(cells,cellT,cellP);
     layer={...layer,name:'Grid Cells',type:'grid-cells',opacity:.85,color:'#60A0D0',
-           cells,clusters,selectedCluster:null};
+           cells,clusters,selectedCluster:null,cellT,cellP};
     _layers.splice(0,0,layer); // 맨 아래 (배경처럼)
     renderLayerPanel();draw();
     toast(`⊞ ${cells.size}셀 · ${clusters.length}군집`);
@@ -4888,15 +5057,29 @@ mc.addEventListener('pointerdown',e=>{
   {
     const gcLayer=_layers.find(l=>l.visible&&l.type==='grid-cells');
     if(gcLayer&&cx>=GUTTER){
-      const cellT=xt(cx),cellP=yc(cy_px);
-      const col=Math.floor(cellT/CELL_T_MS),row=Math.floor(cellP/CELL_P_C);
+      const cT=gcLayer.cellT||60,cPU=gcLayer.cellP||100;
+      const t=xt(cx),p=yc(cy_px);
+      const col=Math.floor(t/cT),row=Math.floor(p/cPU);
       const key=`${col},${row}`;
-      const prev=gcLayer.selectedCluster;
       if(gcLayer.cells.has(key)){
-        const c=gcLayer.cells.get(key);
-        gcLayer.selectedCluster=c.clusterId??null;
-        if(gcLayer.selectedCluster!==prev){showClusterPanel(gcLayer);draw();}
-      } else if(prev!==null&&prev!==undefined){
+        if(e.shiftKey&&_cellAnchor&&_cellAnchor.layerId===gcLayer.id){
+          _cellRegion={
+            col0:Math.min(_cellAnchor.col,col),row0:Math.min(_cellAnchor.row,row),
+            col1:Math.max(_cellAnchor.col,col),row1:Math.max(_cellAnchor.row,row),
+            layerId:gcLayer.id
+          };
+          updateClusterPanelForRegion(gcLayer);
+        }else{
+          _cellAnchor={col,row,layerId:gcLayer.id};
+          _cellRegion=null;
+          const prev=gcLayer.selectedCluster;
+          const c=gcLayer.cells.get(key);
+          gcLayer.selectedCluster=c.clusterId??null;
+          if(gcLayer.selectedCluster!==prev)showClusterPanel(gcLayer);
+        }
+        draw();
+      }else if(!e.shiftKey){
+        _cellAnchor=null;_cellRegion=null;
         gcLayer.selectedCluster=null;
         document.getElementById('cell-cluster-panel')?.classList.remove('show');
         draw();
