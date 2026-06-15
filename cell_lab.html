@@ -16,6 +16,8 @@ html, body { width: 100%; height: 100%; background: #06041A; color: #B0A0D0; fon
 .tb-lbl { font-size: 10px; color: #504070; letter-spacing: .04em; white-space: nowrap; }
 .tb-btn { padding: 4px 10px; background: #181430; border: 1px solid #2A2050; border-radius: 5px; color: #9080C0; font-size: 11px; cursor: pointer; transition: background .12s, border-color .12s; }
 .tb-btn:hover { background: #221860; border-color: #5040A0; color: #C0B0F0; }
+.tb-btn.active { background: #2A1870; border-color: #7050C0; color: #D0C0FF; }
+.tb-res-info { font-size: 9px; color: #3A3060; line-height: 1.5; white-space: nowrap; }
 .tb-input { width: 52px; padding: 3px 6px; background: #0E0C24; border: 1px solid #2A2050; border-radius: 4px; color: #C0B0F0; font-size: 11px; text-align: center; }
 .tb-hint { font-size: 10px; color: #302840; margin-left: auto; white-space: nowrap; }
 
@@ -86,6 +88,12 @@ html, body { width: 100%; height: 100%; background: #06041A; color: #B0A0D0; fon
   <label class="tb-lbl">BPM</label>
   <input class="tb-input" id="bpm-input" type="number" min="20" max="300" value="120" onchange="rebuildGrid()">
   <div class="tb-sep"></div>
+  <label class="tb-lbl">RESOLUTION</label>
+  <button class="tb-btn" id="res-btn-1" onclick="setDisplayMult(1)">×1</button>
+  <button class="tb-btn active" id="res-btn-2" onclick="setDisplayMult(2)">×2</button>
+  <button class="tb-btn" id="res-btn-4" onclick="setDisplayMult(4)">×4</button>
+  <div class="tb-res-info" id="res-info">—</div>
+  <div class="tb-sep"></div>
   <label class="tb-lbl">ZOOM</label>
   <button class="tb-btn" onclick="zoomBy(1.5)">+</button>
   <button class="tb-btn" onclick="zoomBy(1/1.5)">−</button>
@@ -130,14 +138,25 @@ html, body { width: 100%; height: 100%; background: #06041A; color: #B0A0D0; fon
 /* ═══════════════════════════════
    STATE
 ═══════════════════════════════ */
-let _strokes = [];       // [{pts:[{time,pitch}]}]
-let _cells = new Map();  // "col,row" → cell
+let _strokes = [];          // [{pts:[{time,pitch}]}]
+
+// 내부 해상도 — 한 번 빌드, BPM 변경 시에만 재빌드
+let _internalCells = new Map();
+let _internalCellT = 250;   // ms (반박, BPM 120 기준)
+let _internalCellP = 50;    // cents (반음)
+
+// 표시 해상도 — 집계 배수: 1, 2, 4
+let _displayMult = 2;       // 기본값 ×2 → 100¢ × 1박
+
+// 표시용 (집계 결과)
+let _cells = new Map();     // "col,row" → 집계된 표시 셀
 let _clusters = [];
-let _cellT = 500;        // ms per column (1 beat)
-let _cellP = 100;        // cents per row (1 semitone)
+let _cellT = 500;           // ms (표시 단위)
+let _cellP = 100;           // cents (표시 단위)
+
 let _selectedCluster = null;
-let _anchor = null;      // {col,row} — first click anchor for region
-let _region = null;      // {col0,row0,col1,row1}
+let _anchor = null;         // {col,row} — shift-click anchor
+let _region = null;         // {col0,row0,col1,row1}
 
 /* ═══════════════════════════════
    VIEW
@@ -253,17 +272,63 @@ function detectClusters(cells, cellT, cellP) {
   return clusters;
 }
 
-function rebuildGrid() {
-  if (!_strokes.length) return;
-  const bpm = parseFloat(document.getElementById('bpm-input').value) || 120;
-  _cellT = Math.round(60000 / bpm);
-  _cellP = 100;
-  _cells = buildCellGrid(_strokes, _cellT, _cellP);
+// 내부 셀을 표시 배수로 집계
+function aggregateCells(internalCells, mult) {
+  const display = new Map();
+  for (const c of internalCells.values()) {
+    const dCol = Math.floor(c.col / mult), dRow = Math.floor(c.row / mult);
+    const key = `${dCol},${dRow}`;
+    if (!display.has(key)) display.set(key, { col: dCol, row: dRow,
+      dwell: 0, wPitch: 0, wDir: 0, wVib: 0, wSum: 0 });
+    const d = display.get(key);
+    d.dwell   += c.dwell;
+    d.wPitch  += c.avgPitch * c.dwell;
+    d.wDir    += c.avgDir   * c.dwell;
+    d.wVib    += c.vibration * c.dwell;
+    d.wSum    += c.dwell;
+  }
+  const dispCellT = _internalCellT * mult;
+  for (const d of display.values()) {
+    const w = d.wSum || 1;
+    d.avgPitch  = d.wPitch / w;
+    d.avgDir    = d.wDir   / w;
+    d.vibration = d.wVib   / w;
+    d.confidence = Math.min(1, d.dwell / dispCellT);
+    d.source = 'hum';
+    delete d.wPitch; delete d.wDir; delete d.wVib; delete d.wSum;
+  }
+  return display;
+}
+
+// 표시 해상도 전환 (내부 셀 재사용, 재집계만)
+function setDisplayMult(mult) {
+  _displayMult = mult;
+  _cellT = _internalCellT * mult;
+  _cellP = _internalCellP * mult;
+  _cells = aggregateCells(_internalCells, mult);
   _clusters = detectClusters(_cells, _cellT, _cellP);
   _selectedCluster = null; _anchor = null; _region = null;
   hidePanel(); closeZoom();
+  // 버튼 active 상태
+  [1,2,4].forEach(m => {
+    document.getElementById(`res-btn-${m}`)?.classList.toggle('active', m === mult);
+  });
+  // 해상도 정보 레이블
+  const bpm = parseFloat(document.getElementById('bpm-input').value) || 120;
+  document.getElementById('res-info').textContent =
+    `내부 ${_internalCellP}¢×${_internalCellT}ms → 표시 ${_cellP}¢×${_cellT}ms`;
   draw();
-  toast(`⊞ ${_cells.size}셀 · ${_clusters.length}군집 (${bpm} BPM · 셀=${_cellT}ms×${_cellP}¢)`);
+  toast(`⊞ ×${mult} — ${_cells.size}셀 · ${_clusters.length}군집 (${_cellP}¢ × ${_cellT}ms)`);
+}
+
+// BPM 변경 시 내부 셀 전체 재빌드
+function rebuildGrid() {
+  if (!_strokes.length) return;
+  const bpm = parseFloat(document.getElementById('bpm-input').value) || 120;
+  _internalCellT = Math.round(60000 / bpm / 2); // 반박
+  _internalCellP = 50;                           // 반음
+  _internalCells = buildCellGrid(_strokes, _internalCellT, _internalCellP);
+  setDisplayMult(_displayMult);
 }
 
 /* ═══════════════════════════════
