@@ -594,6 +594,7 @@ body.skin-neon #minimap-label{color:#2838A0;}
     <button id="file-menu-btn" onclick="toggleFileMenu()">☰ File</button>
     <div id="file-dropdown">
       <button class="fdrop-item" onclick="triggerAudioImport()">📂 오디오 파일 가져오기</button>
+      <button class="fdrop-item" onclick="saveSketchJSON()">💾 SKETCH JSON 저장</button>
       <div class="fdrop-sep"></div>
       <button class="fdrop-item" id="skin-white-btn" onclick="setSkin('white')">☀ White (흰색)</button>
       <button class="fdrop-item" id="skin-paper-btn" onclick="setSkin('paper')">📜 Paper (종이 질감)</button>
@@ -5255,6 +5256,34 @@ function closeFileMenu(){
 function triggerAudioImport(){
   closeFileMenu();
   document.getElementById('fi-audio').click();
+}
+
+function saveSketchJSON(){
+  closeFileMenu();
+  const exportLayers=_layers
+    .filter(l=>(l.type==='lmh'||l.type==='edit')&&l.strokes?.length)
+    .map(l=>({
+      name:l.name,
+      type:l.type,
+      color:l.color,
+      visible:l.visible,
+      opacity:l.opacity,
+      strokes:l.strokes.map(s=>({
+        pts:(s._editedPts||s.pts).map(p=>({time:p.time,pitch:p.pitch}))
+      })).filter(s=>s.pts.length)
+    }))
+    .filter(l=>l.strokes.length);
+  if(!exportLayers.length){toast('저장할 레이어 없음 (LMH 또는 Edit 레이어 필요)');return;}
+  const data={type:'SKETCH',bpm:_metroBPM,timeSig:_metroTimeSig,layers:exportLayers};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  const ts=new Date().toISOString().slice(0,16).replace('T','_').replace(/:/g,'-');
+  a.download=`sketch_${ts}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast(`✓ SKETCH JSON 저장 — ${exportLayers.length}개 레이어`);
 }
 
 document.getElementById('fi-audio').addEventListener('change',async e=>{
