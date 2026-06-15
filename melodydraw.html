@@ -83,6 +83,27 @@ button{cursor:pointer;font-family:inherit;font-size:11px;border:none;border-radi
 .trp-hint{font-size:7px;color:#4A4268;white-space:nowrap;}
 #canvas-texture-overlay{position:absolute;inset:0;pointer-events:none;z-index:1;opacity:0;transition:opacity .4s;mix-blend-mode:multiply;background-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.68' numOctaves='4' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='256' height='256' filter='url(%23n)' opacity='.11'/></svg>");background-size:256px 256px;}
 #canvas-texture-overlay.active{opacity:1;}
+/* ── Cell Cluster Panel ── */
+#cell-cluster-panel{position:absolute;top:44px;right:8px;z-index:50;display:none;
+  background:rgba(10,8,26,.93);border:1px solid #3A2860;border-radius:8px;
+  min-width:210px;backdrop-filter:blur(6px);user-select:none;overflow:hidden;}
+#cell-cluster-panel.show{display:block;}
+.ccp-hdr{display:flex;justify-content:space-between;align-items:center;
+  padding:6px 10px 5px;border-bottom:1px solid #2A2050;}
+.ccp-title{font-size:10px;color:#A080E0;font-weight:600;letter-spacing:.05em;}
+.ccp-close{background:none;border:none;color:#604880;cursor:pointer;font-size:13px;padding:0;line-height:1;}
+.ccp-close:hover{color:#D08090;}
+.ccp-body{padding:7px 10px 9px;display:flex;flex-direction:column;gap:4px;}
+.ccp-row{display:flex;justify-content:space-between;align-items:baseline;gap:6px;}
+.ccp-row span{font-size:9px;color:#5A4880;}
+.ccp-row strong{font-size:10px;color:#C0B0E0;text-align:right;}
+.ccp-swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:middle;}
+.ccp-hint{font-size:8px;color:#3A3060;margin-top:5px;border-top:1px solid #221840;padding-top:5px;}
+body.skin-sketchbook #cell-cluster-panel{background:rgba(240,232,210,.95);border-color:#C0A870;}
+body.skin-sketchbook .ccp-hdr{border-color:#C0A870;}body.skin-sketchbook .ccp-title{color:#5A3820;}
+body.skin-sketchbook .ccp-row span{color:#9A7848;}body.skin-sketchbook .ccp-row strong{color:#2A1810;}
+body.skin-neon #cell-cluster-panel{background:rgba(4,4,16,.95);border-color:#200840;}
+body.skin-neon .ccp-title{color:#C040FF;}body.skin-neon .ccp-row strong{color:#80E0FF;}
 
 /* ── Side Toolbar ── */
 #side-toolbar{width:40px;flex-shrink:0;background:#0D0B1E;border-right:1px solid #1A1830;display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:4px;z-index:100;user-select:none;}
@@ -743,6 +764,7 @@ body.skin-neon #minimap-label{color:#2838A0;}
       <button class="ls-additem" onclick="addLayerByType('core-line')">— Core Line</button>
       <button class="ls-additem" onclick="addLayerByType('waveform')">〜 Waveform</button>
       <button class="ls-additem" onclick="addLayerByType('pitch-cloud')">· Pitch 구름</button>
+      <button class="ls-additem" onclick="addLayerByType('grid-cells')">⊞ Grid Cells (셀 분석)</button>
     </div>
     <div id="ls-list"><div class="ls-empty">레이어 없음</div></div>
   </div>
@@ -757,6 +779,13 @@ body.skin-neon #minimap-label{color:#2838A0;}
       <span class="trp-val" id="trp-val">350ms</span>
       <button class="trp-btn" onclick="adjToolRange(+50)">+</button>
       <span class="trp-hint">Alt+휠</span>
+    </div>
+    <div id="cell-cluster-panel">
+      <div class="ccp-hdr">
+        <span class="ccp-title">⊞ Cluster 정보</span>
+        <button class="ccp-close" onclick="clearCellSelection()">✕</button>
+      </div>
+      <div class="ccp-body" id="ccp-body"></div>
     </div>
     <div id="join-mode-panel">
       <span class="trp-label">⛓ Join</span>
@@ -1595,8 +1624,141 @@ let _metroBeatFlashes=[];
 let _metroBeat0AcTime=0;
 let _metroVol=0.8;
 let _metroRaf=null;
-const METRO_LOOKAHEAD=0.12; // sec look-ahead
-const METRO_SCHED_MS=40;    // scheduler interval ms
+const METRO_LOOKAHEAD=0.12;
+const METRO_SCHED_MS=40;
+
+/* ═══════════════════════════════════════════
+   GRID CELLS — 허밍의 최소 입자
+═══════════════════════════════════════════ */
+const CELL_T_MS=60;   // ms per time column
+const CELL_P_C =50;   // cents per pitch row
+
+function buildCellGrid(strokes){
+  const cells=new Map();
+  for(const stroke of strokes){
+    const pts=stroke.pts||[];
+    for(let i=0;i<pts.length-1;i++){
+      const {time:t0,pitch:p0}=pts[i],{time:t1,pitch:p1}=pts[i+1];
+      const dt=t1-t0;if(dt<=0)continue;
+      const n=Math.max(1,Math.round(dt/8));
+      const dwellPer=dt/n;
+      for(let j=0;j<=n;j++){
+        const f=j/n,t=t0+f*dt,p=p0+f*(p1-p0);
+        const col=Math.floor(t/CELL_T_MS);
+        const row=Math.floor(p/CELL_P_C);
+        const key=`${col},${row}`;
+        if(!cells.has(key))cells.set(key,{col,row,dwell:0,pAcc:0,pN:0,dAcc:0,pVals:[]});
+        const c=cells.get(key);
+        c.dwell+=dwellPer;c.pAcc+=p;c.pN++;c.pVals.push(p);
+        c.dAcc+=Math.atan2(p1-p0,dt);
+      }
+    }
+  }
+  for(const c of cells.values()){
+    c.avgPitch=c.pAcc/c.pN;
+    c.avgDir=(c.dAcc/c.pN)*(180/Math.PI);
+    const m=c.avgPitch;
+    c.vibration=Math.sqrt(c.pVals.reduce((s,v)=>s+(v-m)*(v-m),0)/c.pVals.length);
+    c.confidence=Math.min(1,c.dwell/CELL_T_MS);
+    delete c.pAcc;delete c.pN;delete c.dAcc;delete c.pVals;
+  }
+  return cells;
+}
+
+function detectClusters(cells){
+  const PAL=['#FF6070','#60B8FF','#80E860','#FFB840','#C070FF','#40DCC0','#FF9860','#88AAFF'];
+  const visited=new Set();const clusters=[];
+  for(const key of cells.keys()){
+    if(visited.has(key))continue;
+    const cl={id:clusters.length,color:PAL[clusters.length%PAL.length],
+      cellKeys:new Set(),dwell:0,minT:Infinity,maxT:-Infinity,
+      minP:Infinity,maxP:-Infinity,pAcc:0,pN:0};
+    const queue=[key];
+    while(queue.length){
+      const k=queue.shift();
+      if(visited.has(k))continue;
+      visited.add(k);cl.cellKeys.add(k);
+      const c=cells.get(k);c.clusterId=cl.id;
+      cl.dwell+=c.dwell;
+      cl.minT=Math.min(cl.minT,c.col*CELL_T_MS);
+      cl.maxT=Math.max(cl.maxT,(c.col+1)*CELL_T_MS);
+      cl.minP=Math.min(cl.minP,c.row*CELL_P_C);
+      cl.maxP=Math.max(cl.maxP,(c.row+1)*CELL_P_C);
+      cl.pAcc+=c.avgPitch;cl.pN++;
+      const [col,row]=k.split(',').map(Number);
+      for(let dc=-1;dc<=1;dc++)for(let dr=-1;dr<=1;dr++){
+        if(!dc&&!dr)continue;
+        const nk=`${col+dc},${row+dr}`;
+        if(cells.has(nk)&&!visited.has(nk))queue.push(nk);
+      }
+    }
+    cl.avgPitch=cl.pAcc/cl.pN;
+    delete cl.pAcc;delete cl.pN;
+    clusters.push(cl);
+  }
+  return clusters;
+}
+
+function drawGridCellLayer(layer){
+  const cells=layer.cells;
+  if(!cells||!cells.size)return;
+  const W=mc.clientWidth,H=mc.clientHeight;
+  let maxDwell=0;
+  for(const c of cells.values())if(c.dwell>maxDwell)maxDwell=c.dwell;
+  if(!maxDwell)return;
+  const clusters=layer.clusters||[];
+  const selId=layer.selectedCluster;
+  ctx.save();
+  ctx.globalAlpha=layer.opacity;
+  for(const [key,c] of cells){
+    const x0=tx(c.col*CELL_T_MS),x1=tx((c.col+1)*CELL_T_MS);
+    const yTop=cy((c.row+1)*CELL_P_C),yBot=cy(c.row*CELL_P_C);
+    if(x1<GUTTER||x0>W||yBot<0||yTop>H)continue;
+    const alpha=0.12+0.72*(c.dwell/maxDwell);
+    const isSelected=selId!==null&&clusters[selId]?.cellKeys.has(key);
+    if(isSelected){
+      ctx.fillStyle=`rgba(255,220,60,${Math.min(1,alpha*1.4)})`;
+      ctx.strokeStyle='rgba(255,240,100,.9)';
+      ctx.lineWidth=1.5;
+      ctx.fillRect(x0,yTop,x1-x0,yBot-yTop);
+      ctx.strokeRect(x0,yTop,x1-x0,yBot-yTop);
+    }else{
+      const clCol=clusters[c.clusterId??0]?.color||'#8080C0';
+      const r=parseInt(clCol.slice(1,3),16),g=parseInt(clCol.slice(3,5),16),b=parseInt(clCol.slice(5,7),16);
+      ctx.fillStyle=`rgba(${r},${g},${b},${alpha})`;
+      ctx.fillRect(x0,yTop,x1-x0,yBot-yTop);
+    }
+  }
+  ctx.restore();
+}
+
+function showClusterPanel(layer){
+  const panel=document.getElementById('cell-cluster-panel');
+  if(!panel)return;
+  const idx=layer.selectedCluster;
+  const cl=layer.clusters?.[idx];
+  if(!cl){panel.classList.remove('show');return;}
+  const durationMs=cl.maxT-cl.minT;
+  const pitchRange=`${centsToNote(cl.minP)} – ${centsToNote(cl.maxP)}`;
+  const dirLabel=cl.avgPitch>0?'↑ 상승':cl.avgPitch<0?'↓ 하강':'→ 수평';
+  document.getElementById('ccp-body').innerHTML=`
+    <div class="ccp-row"><span>군집</span><strong><span class="ccp-swatch" style="background:${cl.color}"></span>#${cl.id+1}</strong></div>
+    <div class="ccp-row"><span>셀 수</span><strong>${cl.cellKeys.size} 셀</strong></div>
+    <div class="ccp-row"><span>시간 범위</span><strong>${(cl.minT/1000).toFixed(2)}s – ${(cl.maxT/1000).toFixed(2)}s</strong></div>
+    <div class="ccp-row"><span>지속 시간</span><strong>${durationMs.toFixed(0)}ms</strong></div>
+    <div class="ccp-row"><span>체류 누적</span><strong>${cl.dwell.toFixed(0)}ms</strong></div>
+    <div class="ccp-row"><span>평균 음정</span><strong>${centsToNote(cl.avgPitch)} (${cl.avgPitch>0?'+':''}${cl.avgPitch.toFixed(0)}¢)</strong></div>
+    <div class="ccp-row"><span>피치 범위</span><strong>${pitchRange}</strong></div>
+    <div class="ccp-hint">셀을 클릭해 군집을 선택 · ✕로 해제</div>`;
+  panel.classList.add('show');
+}
+
+function clearCellSelection(){
+  const gcLayer=_layers.find(l=>l.type==='grid-cells');
+  if(gcLayer)gcLayer.selectedCluster=null;
+  document.getElementById('cell-cluster-panel')?.classList.remove('show');
+  draw();
+}
 
 function metroBeatSec(){return 60/_metroBPM;}
 function metroBeatsPerBar(){
@@ -2995,6 +3157,19 @@ function addLayerByType(type){
     const snap=allS.map(s=>({pts:(s._editedPts||s.pts).map(p=>({...p}))}));
     layer={...layer,name:`스냅샷 ${_lyrSeq}`,type:'snapshot',opacity:.35,color:'#70A870',data:snap};
     _layers.push(layer);
+  } else if(type==='grid-cells'){
+    const srcStrokes=_layers.filter(l=>l.visible&&l.type==='lmh'&&l.strokes?.length)
+      .flatMap(l=>l.strokes);
+    if(!srcStrokes.length){toast('LMH 레이어(허밍 원본)가 필요합니다');return;}
+    const cells=buildCellGrid(srcStrokes);
+    if(!cells.size){toast('셀 생성 실패');return;}
+    const clusters=detectClusters(cells);
+    layer={...layer,name:'Grid Cells',type:'grid-cells',opacity:.85,color:'#60A0D0',
+           cells,clusters,selectedCluster:null};
+    _layers.splice(0,0,layer); // 맨 아래 (배경처럼)
+    renderLayerPanel();draw();
+    toast(`⊞ ${cells.size}셀 · ${clusters.length}군집`);
+    return;
   } else return;
   renderLayerPanel();
   draw();
@@ -3055,7 +3230,7 @@ function renderLayerPanel(){
   const sideList=document.getElementById('ls-list');
   if(!sideList)return;
   if(!_layers.length){sideList.innerHTML='<div class="ls-empty">레이어 없음</div>';return;}
-  const typeColor={waveform:'#5068A0','pitch-cloud':'#C8A040','core-line':'#C89030',snapshot:'#70A870',lmh:'#4a6fa5',edit:'#A870C8'};
+  const typeColor={waveform:'#5068A0','pitch-cloud':'#C8A040','core-line':'#C89030',snapshot:'#70A870',lmh:'#4a6fa5',edit:'#A870C8','grid-cells':'#60A0D0'};
   const reversed=[..._layers].reverse();
   let html='';
   let lastGid=undefined;
@@ -3125,7 +3300,7 @@ function renderLayerThumbs(){
   function ttx(t,w,pad=2){return pad+(t-tMin)/tRange*(w-pad*2);}
   function tcy(p,h,pad=2){return h-pad-(p-pMin)/pRange*(h-pad*2);}
 
-  const typeColor={waveform:'#5068A0','pitch-cloud':'#C8A040','core-line':'#C89030',snapshot:'#70A870',lmh:'#4a6fa5',edit:'#A870C8'};
+  const typeColor={waveform:'#5068A0','pitch-cloud':'#C8A040','core-line':'#C89030',snapshot:'#70A870',lmh:'#4a6fa5',edit:'#A870C8','grid-cells':'#60A0D0'};
 
   document.querySelectorAll('#ls-list .ls-thumb canvas').forEach(cv=>{
     const lid=parseInt(cv.dataset.lid);
@@ -3325,7 +3500,8 @@ function playPianoNote(pitchCents){
 function drawLayers(){
   _layers.forEach(l=>{
     if(!l.visible)return;
-    if(l.type==='waveform')       drawWaveformLayer(l);
+    if(l.type==='grid-cells')     drawGridCellLayer(l);
+    else if(l.type==='waveform')       drawWaveformLayer(l);
     else if(l.type==='pitch-cloud') drawPitchCloudLayer(l);
     else if(l.type==='core-line')   drawCoreLineLayer(l);
     else if(l.type==='snapshot')    drawSnapshotLayer(l);
@@ -4708,6 +4884,25 @@ mc.addEventListener('pointerdown',e=>{
   else if(_tool==='select') toolSelectDown(cx,cy_px,e.shiftKey);
   else if(_tool==='wand') toolWandDown(cx,cy_px);
   else draw(); // play mode: cursor만 업데이트
+  // Grid Cell click: 어떤 툴이든 셀 레이어 있으면 클릭 감지
+  {
+    const gcLayer=_layers.find(l=>l.visible&&l.type==='grid-cells');
+    if(gcLayer&&cx>=GUTTER){
+      const cellT=xt(cx),cellP=yc(cy_px);
+      const col=Math.floor(cellT/CELL_T_MS),row=Math.floor(cellP/CELL_P_C);
+      const key=`${col},${row}`;
+      const prev=gcLayer.selectedCluster;
+      if(gcLayer.cells.has(key)){
+        const c=gcLayer.cells.get(key);
+        gcLayer.selectedCluster=c.clusterId??null;
+        if(gcLayer.selectedCluster!==prev){showClusterPanel(gcLayer);draw();}
+      } else if(prev!==null&&prev!==undefined){
+        gcLayer.selectedCluster=null;
+        document.getElementById('cell-cluster-panel')?.classList.remove('show');
+        draw();
+      }
+    }
+  }
 });
 mc.addEventListener('pointermove',e=>{
   if(_isPan){
